@@ -8,6 +8,7 @@ local absenceGrace=5
 local bannerCooldown=30
 local newEntryCooldown=300
 local pollInterval=.25
+local rosterSettleTime=1
 local groupWindow=3
 local pendingLifetime, pendingLimit=12,8
 local plateLimit=256
@@ -91,6 +92,7 @@ function B.installSightings()
     register("PLAYER_LOGOUT")
     local target=register("PLAYER_TARGET_CHANGED")
     local mouseover=register("UPDATE_MOUSEOVER_UNIT")
+    local roster=register("GROUP_ROSTER_UPDATE")
     local episodes, previous={},{}
     local plates, plateCount, platesEnabled, plateRevision={},0,false,0
     local sampled,requested,metadataRetry={},{},false
@@ -113,6 +115,8 @@ function B.installSightings()
     end
     local world, scanning, pending, updating, revision=true,false,false,false,0
     local resumeTest, suspended=false,false
+    local suspendedSightings, rosterRetryUntil
+    local carriedRegion
     local inUpdate, clockAvailable=false,false
     local update
     local function hide()
@@ -140,14 +144,34 @@ function B.installSightings()
     local function resetSightings()
         for _,episode in pairs(episodes) do stopEncounter(episode,clock) end
         episodes,previous,queue={},{},{}
+        carriedRegion=nil
         sampled,metadataRetry={},false
+        rosterRetryUntil=nil
         sampledOwner.store=nil
         resumeTest=false
         hide()
     end
+    local function rememberSightings()
+        suspendedSightings=suspendedSightings or {}
+        for _,sighting in pairs(previous) do suspendedSightings[sighting.id]=sighting end
+    end
+    local function carryHandledRoster()
+        local seen, handled={},{}
+        for token,sighting in pairs(previous) do
+            local episode=episodes[sighting.id]
+            if episode and episode.handled and same(sighting,episode.sighting)
+                and (token:match("^party%d+$") or token:match("^raid%d+$")) then
+                seen[token]=sighting
+                handled[sighting.id]={sighting=sighting,handled=true}
+            end
+        end
+        return seen,handled
+    end
     local function suspend()
+        rosterRetryUntil=nil
         if suspended then return end
         suspended=true
+        rememberSightings()
         resetSightings()
     end
     local function pruneCooldowns(armDeferred)
@@ -189,7 +213,8 @@ function B.installSightings()
         end
     end
     local function refreshUpdates()
-        local needed=not not (world and (pending or visible or previous.mouseover or #queue>0 or trackingPlate()))
+        local needed=not not (world and (pending or rosterRetryUntil or visible or previous.mouseover
+            or #queue>0 or trackingPlate()))
         if world and not needed then
             for _,episode in pairs(episodes) do
                 if episode.absentSince or episode.encounterAbsentSince then needed=true; break end
@@ -275,9 +300,13 @@ function B.installSightings()
         if visible==nil then return nil end
         return visible and rawequal(frame,plate.frame)
     end
-    local function scan(owner, resume, metadata)
+    local function scan(owner, resume, metadata, rosterGroup, paintElapsed)
         local store,region=A.store,A.region
         if not world or owner~=revision then return end
+        if carriedRegion and carriedRegion~=region then
+            resetSightings()
+            if not world or owner~=revision then return end
+        end
         if not store or not hasBlacklist() then
             resetSightings()
             return
@@ -296,38 +325,52 @@ function B.installSightings()
         -- non-match. A restriction must not rearm a continuous sighting.
         local units={}
         local currentSample=sampledOwner.store==store and sampled.region==region and sampled
-        local function inspect(token, enabled, plate)
+        local function inspect(token, enabled, plate, rosterSource)
             if not ownsScan() then return end
             local sighting,evidence,memo=false,nil,false
             local function ownsUnit()
                 return ownsScan() and (not plate or plates[token]==plate)
             end
-            if enabled then
+            if enabled==nil then
+                sighting,memo=nil,nil
+            elseif enabled then
                 local available=not plate or ownsPlate(token,plate)
                 if available and ownsUnit() then
                     local recycled
-                    sighting,evidence,memo,recycled=readSighting(token,reader.worldSource(token),store,region,
+                    sighting,evidence,memo,recycled=readSighting(token,rosterSource or reader.worldSource(token),store,region,
                         currentSample and currentSample[token],metadata,ownsUnit,plate)
                     if recycled and ownsUnit() then forgetPlate(token) end
                 elseif available==nil then
                     sighting,memo=nil,nil
                 end
             end
-            units[#units+1]={token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate}
+            units[#units+1]={token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate,roster=rosterSource}
         end
         if target then inspect("target",true) end
         if mouseover then inspect("mouseover",true) end
+        local prefix,count,rosterSource
+        if roster then prefix,count,rosterSource=reader.groupRoster() end
+        local rosterUnits={}
+        for i=1,count or 0 do
+            local token=prefix..i
+            rosterUnits[token]=i
+            inspect(token,true,nil,rosterSource)
+        end
         local tokens={}
         for token,plate in pairs(plates) do
             if plate.record or previous[token] then tokens[#tokens+1]=token end
         end
         for token in pairs(previous) do
-            if token~="target" and token~="mouseover" and not plates[token] then tokens[#tokens+1]=token end
+            if token~="target" and token~="mouseover" and not plates[token] and not rosterUnits[token] then
+                tokens[#tokens+1]=token
+            end
         end
         table.sort(tokens)
         for _,token in ipairs(tokens) do
             local plate=plates[token]
-            inspect(token,plate and plate.record,plate)
+            if reader.nameplateToken(token) then inspect(token,plate and plate.record or false,plate)
+            elseif prefix then inspect(token,false,nil,rosterSource)
+            else inspect(token,nil,nil,token:sub(1,4)=="raid" and "Raid" or "Party") end
         end
         if not ownsScan() then
             if world and owner==revision then pending=true end
@@ -370,16 +413,25 @@ function B.installSightings()
                     zone=A.text(read(GetRealZoneText))
                     if zone and not zone:find("%S") then zone=nil end
                 end
-                if unit.place and not zone and ownsScan() then unit.group=readGroupContext(unit.token) end
+                if unit.place and not zone and ownsScan() then
+                    if unit.roster then unit.group=unit.roster=="Raid" and "Raid" or "Group"
+                    else unit.group=readGroupContext(unit.token) end
+                end
             end
         end
         local function verifyUnit(unit,sighting)
             if not ownsScan() or unit.plate and not ownsPlate(unit.token,unit.plate) then return false end
+            if unit.roster then
+                local livePrefix,liveCount=reader.groupRoster()
+                if livePrefix~=prefix or liveCount<rosterUnits[unit.token] or not ownsScan() then return false end
+            end
             local name,guid=A.playerAddIdentity(unit.token,store,region,ownsScan)
             return name==sighting.name and guid==sighting.guid and ownsScan()
         end
         for _,unit in ipairs(units) do
-            if unit.sighting and (unit.place or unit.plate) and not verifyUnit(unit,unit.sighting) then unit.sighting=nil end
+            if unit.sighting and (unit.place or unit.plate or unit.roster) and not verifyUnit(unit,unit.sighting) then
+                unit.sighting=nil
+            end
         end
         local currentRegion=read(GetCurrentRegion)
         if not world or owner~=revision then return end
@@ -388,15 +440,17 @@ function B.installSightings()
             resetSightings()
             return
         end
-        local resumed=suspended
-        suspended=false
+        local resumed,resumedSightings=suspended,suspendedSightings
+        suspended,suspendedSightings=false,nil
         local present, supported, uncertain, candidates={},{},{},{}
         local observations=metadata.observations
         for _,unit in ipairs(units) do
             local token,sighting,plate=unit.token,unit.sighting,unit.plate
+            metadata.rosterSamples[token]=unit.roster
             if sighting==nil then
                 local prior=previous[token]
                 if prior then uncertain[prior.id]=prior end
+                if unit.roster then metadata.samples[token]=false end
             else
                 previous[token]=sighting or nil
                 metadata.samples[token]=unit.memo
@@ -414,16 +468,15 @@ function B.installSightings()
                 candidate.units[#candidate.units+1]=unit
                 if token=="target" then candidate.target=true
                 elseif token=="mouseover" then candidate.mouseover=true
-                else
-                    candidate.nameplate=true
-                end
+                elseif plate then candidate.nameplate=true
+                else candidate.roster=true end
                 if unit.place then
                     candidate.place=true
                     if not candidate.group or unit.group=="Raid" then candidate.group=unit.group end
                 end
                 if unit.evidence then
                     observations[#observations+1]={id=sighting.id,evidence=unit.evidence,
-                        owns=plate and function() return verifyUnit(unit,sighting) end or nil}
+                        owns=(plate or unit.roster) and function() return verifyUnit(unit,sighting) end or nil}
                     for _,field in ipairs({"class","faction"}) do
                         local value=unit.evidence[field]
                         if value then
@@ -445,11 +498,11 @@ function B.installSightings()
             local candidate=supported[sighting.id]
             return candidate and same(sighting,candidate.sighting)
         end
-        local function ownsCurrentSighting(sighting,plateOnly)
+        local function ownsCurrentSighting(sighting,needsCurrent)
             local candidate=supported[sighting.id]
             if not candidate or not same(candidate.sighting,sighting) then return false end
             for _,unit in ipairs(candidate.units) do
-                if (not plateOnly or unit.plate) and verifyUnit(unit,sighting) then return true end
+                if (not needsCurrent or unit.plate or unit.roster) and verifyUnit(unit,sighting) then return true end
             end
             return false
         end
@@ -466,7 +519,7 @@ function B.installSightings()
             local entry=queue[i]
             local sighting=entry.sighting
             if not currentlySupported(sighting)
-                and (entry.plateOnly or same(sighting,uncertain[sighting.id])) then discard(i) end
+                and (entry.needsCurrent or same(sighting,uncertain[sighting.id])) then discard(i) end
         end
         expireEpisodes()
         for _,episode in pairs(episodes) do
@@ -484,12 +537,14 @@ function B.installSightings()
             if not episode and (not resume or resumed) then
                 -- A sighting carried out of an instance or begun during cooldown
                 -- stays quiet until all of its sources clear.
-                episode={sighting=sighting,handled=resumed or onCooldown(region,sighting.name)}
+                local newRosterSighting=candidate.roster
+                    and not same(sighting,resumedSightings and resumedSightings[sighting.id])
+                episode={sighting=sighting,handled=(resumed and not newRosterSighting) or onCooldown(region,sighting.name)}
                 episodes[sighting.id]=episode
             end
             if episode and same(sighting,episode.sighting) then
-                local plateOnly=not (candidate.target or candidate.mouseover)
-                if episode.queued and not plateOnly then episode.queued.plateOnly=false end
+                local needsCurrent=not (candidate.target or candidate.mouseover)
+                if episode.queued and not needsCurrent then episode.queued.needsCurrent=false end
                 if candidate.place then
                     if not episode.encounter then
                         local id=ledger.start(sighting,region,observedAt)
@@ -499,7 +554,7 @@ function B.installSightings()
                     local encounter=episode.encounter
                     if encounter then
                         encounter.key=ledger.observe(encounter.id,candidate.target,candidate.mouseover,
-                            clock-episode.startedClock,zone,candidate.group,candidate.nameplate) or encounter.key
+                            clock-episode.startedClock,zone,candidate.group,candidate.nameplate,candidate.roster) or encounter.key
                         -- Keep this physical episode's ID through grace expiry.
                         local entry=episode.queued
                         if entry and entry.episode==episode and not entry.encounter then entry.encounter=encounter end
@@ -512,7 +567,7 @@ function B.installSightings()
                     end
                     if not duplicate and #queue<pendingLimit then
                         local entry={sighting=sighting,episode=episode,region=region,at=clock,
-                            encounter=episode.encounter,plateOnly=plateOnly}
+                            encounter=episode.encounter,needsCurrent=needsCurrent}
                         queue[#queue+1]=entry
                         episode.queued=entry
                     elseif duplicate then
@@ -524,9 +579,12 @@ function B.installSightings()
         -- A new alert can join a brief overlap. A transient queued alert still
         -- gets its usual standalone display if either player is no longer observed.
         local display=visible
-        if display and #queue>0 and clock-display.openedAt<=groupWindow and display.episode
+        local staged=display and display.rosterGroup
+        if display and #queue>0 and (staged and staged==rosterGroup or not staged and clock-display.openedAt<=groupWindow)
+            and display.episode
             and episodes[display.id]==display.episode and currentlySupported(display) then
             local count, batch=display.count or 0,{}
+            local usesRoster=supported[display.id].roster
             local function ownsGroup()
                 if B.testShown() or not ownsScan() or visible~=display then return false end
                 for _,item in ipairs(batch) do
@@ -538,20 +596,41 @@ function B.installSightings()
                 if count+#batch>=pendingLimit then break end
                 local sighting=entry.sighting
                 local age=clock-entry.at
-                if entry.region==region and age>=pollInterval and age<=pendingLifetime
+                if (not staged or staged[entry]) and entry.region==region and age>=pollInterval and age<=pendingLifetime
                     and sighting.id~=display.id and episodes[sighting.id]==entry.episode
                     and not onCooldown(region,sighting.name) and currentlySupported(sighting) then
                     local saved=savedSighting(store,region,sighting.name,sighting.guid)
                     if same(saved,sighting) and saved.reasons==sighting.reasons and ownsCurrentSighting(saved) then
                         batch[#batch+1]={index=index,entry=entry}
+                        usesRoster=usesRoster or supported[sighting.id].roster
                     end
                     if not ownsScan() then return end
                 end
             end
             if #batch>0 and ownsCurrentSighting(display) and ownsGroup() then
                 if not allowsLiveBanner() then clearPlates(); suspend(); return end
+                if usesRoster and not staged and ownsGroup() then
+                    -- Keep roster members queued until the frame that will actually paint the count.
+                    local group={}
+                    for _,item in ipairs(batch) do group[item.entry]=true end
+                    display.rosterGroup=group
+                    return
+                end
                 if read(GetCurrentRegion)==region and display.appearance() and ownsGroup()
                     and B.addLive(count+#batch,ownsGroup) then
+                    if staged then
+                        local function ownsPaint()
+                            return display.appearance() and ownsGroup()
+                        end
+                        if not B.advanceLive(paintElapsed,false,ownsPaint) or not ownsPaint() then
+                            if visible==display then
+                                hide()
+                                if world and #queue>0 then pending=true end
+                            end
+                            return
+                        end
+                    end
+                    display.rosterGroup=nil
                     for i=#batch,1,-1 do
                         local item=batch[i]
                         startCooldown(region,item.entry.sighting.name,bannerCooldown)
@@ -563,14 +642,15 @@ function B.installSightings()
             end
             if not ownsScan() then return end
         end
+        if staged and staged==rosterGroup and visible==display then display.rosterGroup=nil end
         while #queue>0 and not visible and (clockAvailable or inUpdate) do
             local entry=queue[1]
             local expired=clock-entry.at>pendingLifetime
             local saved=not expired and entry.region==region and savedSighting(store,region,entry.sighting.name,entry.sighting.guid)
-            local plateOwned=not entry.plateOnly or ownsCurrentSighting(entry.sighting,true)
+            local stillObserved=not entry.needsCurrent or ownsCurrentSighting(entry.sighting,true)
             if not world or owner~=revision then return end
             if store~=A.store or region~=A.region then pending=true; return end
-            if not plateOwned or not same(entry.sighting,saved) or entry.sighting.reasons~=saved.reasons then
+            if not stillObserved or not same(entry.sighting,saved) or entry.sighting.reasons~=saved.reasons then
                 discard(1,expired and entry.waitingForUI)
             elseif onCooldown(region,saved.name) then
                 discard(1,true)
@@ -596,7 +676,7 @@ function B.installSightings()
                 local displayRegion=read(GetCurrentRegion)
                 local testShown=B.testShown()
                 local appeared=ownsAppearance()
-                if entry.plateOnly and not ownsCurrentSighting(entry.sighting,true) then
+                if entry.needsCurrent and not ownsCurrentSighting(entry.sighting,true) then
                     if ownsScan() and queue[1]==entry then discard(1) end
                     hide()
                     return
@@ -626,7 +706,7 @@ function B.installSightings()
                 A.alertSound.playBanner(function()
                     if not ownsScan() or visible~=saved or not allowsLiveBanner() or read(GetCurrentRegion)~=region
                         or B.testShown() or not ownsAppearance()
-                        or entry.plateOnly and not ownsCurrentSighting(entry.sighting,true) then return false end
+                        or entry.needsCurrent and not ownsCurrentSighting(entry.sighting,true) then return false end
                     return ownsScan() and visible==saved
                 end)
                 return
@@ -635,8 +715,9 @@ function B.installSightings()
             end
         end
     end
-    local function sample(resume)
+    local function sample(resume, rosterChanged, rosterGroup, paintElapsed)
         clockAvailable=(next(episodes) or (A.store and hasBlacklist())) and advance()
+        if rosterChanged then rosterRetryUntil=clock+rosterSettleTime end
         resumeTest=false
         revision=revision+1
         if scanning then pending=true; refreshUpdates(); return end
@@ -644,9 +725,9 @@ function B.installSightings()
         scanning,pending,metadataRetry=true,false,false
         local owner,store,region=revision,A.store,A.region
         local ledgerRevision=ledger.revision()
-        local metadata={observations={},samples={},plateSamples={},requested=requested,retried=retried}
+        local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried}
         requested={}
-        scan(owner,resume,metadata)
+        scan(owner,resume,metadata,rosterGroup,paintElapsed)
         local function owns()
             return world and owner==revision and A.store==store and A.region==region
         end
@@ -661,7 +742,8 @@ function B.installSightings()
             if sampledOwner.store~=store or sampled.region~=region then sampled={} end
             sampledOwner.store,sampled.region=settled,region
             for token,memo in pairs(metadata.samples) do
-                if token=="target" or token=="mouseover" or plates[token] and plates[token]==metadata.plateSamples[token] then
+                if token=="target" or token=="mouseover" or metadata.rosterSamples[token]
+                    or plates[token] and plates[token]==metadata.plateSamples[token] then
                     sampled[token]=settleSample(settled,memo)
                 end
             end
@@ -692,14 +774,22 @@ function B.installSightings()
         if expired then hide() end
         local display=visible
         local count=display and display.count
+        local rosterGroup=display and display.rosterGroup
         -- WoW may clear mouseover without delivering a second unit event.
-        if pending or expired or ((visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then sample(resumeTest) end
+        local rosterDue=rosterRetryUntil and (clock>=nextPoll or clock>=rosterRetryUntil)
+        if rosterRetryUntil and clock>=rosterRetryUntil then rosterRetryUntil=nil end
+        if pending or expired or rosterGroup or rosterDue
+            or ((visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then
+            sample(resumeTest,nil,rosterGroup,elapsed)
+        end
         expireEpisodes()
         refreshNavigation()
         if visible then
             local alpha=B.alphaAt(clock-shownAt)
             if alpha<1 then B.fade(alpha)
-            elseif visible==display then B.advanceLive(elapsed,visible.count~=count) end
+            elseif visible==display and (not rosterGroup or visible.count==count) then
+                B.advanceLive(elapsed,visible.count~=count)
+            end
         end
         inUpdate=false
         refreshUpdates()
@@ -760,13 +850,20 @@ function B.installSightings()
     end
     observer:SetScript("OnEvent",function(_,event)
         if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
+            local seen,handled={},{}
+            carriedRegion=nil
+            if event=="PLAYER_LEAVING_WORLD" then
+                rememberSightings()
+                seen,handled=carryHandledRoster()
+                if next(seen) then carriedRegion=A.region end
+            end
             world,pending,revision=false,false,revision+1
             local oldEpisodes=episodes
-            episodes,previous,queue={},{},{}
+            episodes,previous,queue=handled,seen,{}
             clearPlates()
             sampled,requested,metadataRetry={},{},false
             sampledOwner.store=nil
-            resumeTest=false
+            resumeTest,rosterRetryUntil=false,nil
             hide()
             if next(oldEpisodes) then advance() end
             for _,episode in pairs(oldEpisodes) do stopEncounter(episode,clock) end
@@ -774,12 +871,12 @@ function B.installSightings()
         elseif event=="PLAYER_ENTERING_WORLD" then
             world=true
             seedPlates()
-            sample()
+            sample(nil,roster)
         elseif world then
             if event=="PLAYER_TARGET_CHANGED" then requested.target=true end
             if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover=true end
             if event=="ZONE_CHANGED_NEW_AREA" then seedPlates() end
-            sample()
+            sample(nil,event=="GROUP_ROSTER_UPDATE")
         end
     end)
 end

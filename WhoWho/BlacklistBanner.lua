@@ -181,13 +181,14 @@ local function applyPulse(frame,progress)
     frame.content:SetScale(1+zoom*math.sin(math.pi*progress))
 end
 
-local function advanceTransition(frame,elapsed)
+local function advanceTransition(frame,elapsed,stillOwns)
     local change=frame.transition
     if not change then return end
     local count=change.count
     local function owns()
-        return frame.transition==change and change.count==count
+        return (not stillOwns or stillOwns()) and frame.transition==change and change.count==count
     end
+    if not owns() then return end
     change.age=change.age+elapsed
     local progress=math.min(1,change.age/transitionTime)
     local eased=progress*progress*(3-2*progress)
@@ -213,6 +214,7 @@ local function advanceTransition(frame,elapsed)
     else
         applyPulse(frame,progress)
     end
+    return true
 end
 
 local function startTestTimer(frame)
@@ -401,11 +403,11 @@ function B.addLive(count,owns)
     return true
 end
 
-function B.advanceLive(elapsed,justAdded)
+function B.advanceLive(elapsed,justAdded,owns)
     local owner=livePaint
     local change=owner and live.transition
     if change and (not justAdded or change.age>0) and live:IsVisible()
-        and owner==livePaint and live.transition==change then advanceTransition(live,elapsed) end
+        and owner==livePaint and live.transition==change then return advanceTransition(live,elapsed,owns) end
 end
 
 function B.clearLiveEncounter()
