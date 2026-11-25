@@ -1,6 +1,7 @@
 local P=WhowhoPreview
 local A=P.manual
 local B=P.BlacklistBanner
+local G=P.GuildBlacklist
 local ledger=A.encounterLedger
 local read, readable=A.nativeRead.read, A.nativeRead.readable
 local reader=A.unitReader
@@ -22,11 +23,24 @@ local function allowsLiveBanner()
         and kind~="party" and kind~="raid"
 end
 
-local function savedSighting(store,region,name,guid)
+local function guildMatch(store,region,name,guid,lookup)
+    if not lookup then return end
+    local personal,issue=store.find(region,name,guid)
+    if issue=="conflict" or personal and personal.membership=="blacklist" then return end
+    return lookup(name)
+end
+
+local function savedSighting(store,region,name,guid,guildLookup)
     local record=ledger.findBlacklist(store,region,name,guid)
-    if not record then return false end
-    local reasons=A.reasonText(record.reasonIds," · ")
-    return {id=record.id,name=record.fullName,guid=guid,reasons=reasons},record.lastKnown
+    if record then
+        local reasons=A.reasonText(record.reasonIds," · ")
+        return {id=record.id,name=record.fullName,guid=guid,reasons=reasons},record.lastKnown
+    end
+    local id,reasons=guildMatch(store,region,name,guid,guildLookup)
+    if not id then return false end
+    local source=P.L("Guild Blacklist")
+    if reasons~="" then source=source.." · "..reasons end
+    return {id=id,name=name,guid=guid,reasons=source,guild=true}
 end
 
 local function same(a,b)
@@ -40,8 +54,9 @@ local function readSighting(token, source, store, region, sampled, metadata, own
     if state=="absent" or state=="non-player" or state=="self" then return false,nil,false end
     if not name then return nil end
     if plate and (plate.name~=name or plate.guid~=guid) then return false,nil,false,true end
-    local sighting,known=savedSighting(store,region,name,guid)
+    local sighting,known=savedSighting(store,region,name,guid,metadata.guildLookup)
     if not sighting then return false,nil,false end
+    if sighting.guild then return sighting,nil,false end
     local repeated=same(sighting,sampled)
     if repeated and (not sampled.incomplete or not (retry or metadata.requested[token])) then return sighting end
     local ownedFields=repeated and known and known.guid==guid and known or nil
@@ -114,6 +129,7 @@ function B.installSightings()
         end
     end
     local world, scanning, pending, updating, revision=true,false,false,false,0
+    local guildDirty=false
     local resumeTest, suspended=false,false
     local suspendedSightings, rosterRetryUntil
     local inUpdate, clockAvailable=false,false
@@ -234,10 +250,11 @@ function B.installSightings()
         for _,entry in ipairs(queue) do entry.waitingForUI=true end
         pending=true
     end
-    local function plateRecord(store,region,plate)
+    local function plateRecord(store,region,plate,guildLookup)
         if not store or region~=plate.region then return end
         local record=store.find(region,plate.name,plate.guid)
         if record and record.identityState=="resolved" and record.membership=="blacklist" then return record.id end
+        return guildMatch(store,region,plate.name,plate.guid,guildLookup)
     end
     local function forgetPlate(token)
         if not plates[token] then return end
@@ -248,7 +265,7 @@ function B.installSightings()
         for token in pairs(plates) do forgetPlate(token) end
         plateRevision=plateRevision+1
     end
-    local function rememberPlate(token,expectedFrame)
+    local function rememberPlate(token,expectedFrame,guildLookup)
         if plateCount>=plateLimit then return end
         local owned,store,region=plateRevision,A.store,A.region
         if not region or not allowsLiveBanner() or not world or owned~=plateRevision then return end
@@ -260,7 +277,7 @@ function B.installSightings()
         local name,guid=A.playerAddIdentity(token,store,region,owns)
         if not name or not reader.playerGuid(guid) or not reader.playerPlate(token,frame) or not owns() then return end
         local plate={frame=frame,name=name,guid=guid,region=region}
-        plate.record=plateRecord(store,region,plate)
+        plate.record=plateRecord(store,region,plate,guildLookup)
         plates[token],plateCount=plate,plateCount+1
         return plate.record~=nil
     end
@@ -269,13 +286,14 @@ function B.installSightings()
         local owned=plateRevision
         local frames=reader.nameplateFrames()
         if not frames then return end
+        local guildLookup=G.bannerLookup(A.region)
         local matched,count=false,0
         for _,frame in next,frames do
             if count>=plateLimit or owned~=plateRevision then break end
             count=count+1
             local token=reader.nameplateUnit(frame)
             if owned~=plateRevision then break end
-            if token and not plates[token] and rememberPlate(token,frame) then matched=true end
+            if token and not plates[token] and rememberPlate(token,frame,guildLookup) then matched=true end
         end
         return matched
     end
@@ -286,10 +304,15 @@ function B.installSightings()
         if visible==nil then return nil end
         return visible and rawequal(frame,plate.frame)
     end
-    local function scan(owner, resume, metadata, rosterGroup, paintElapsed)
+    local function scan(owner, resume, metadata, groupToPaint, paintElapsed)
         local store,region=A.store,A.region
         if not world or owner~=revision then return end
-        if not store or not hasBlacklist() then
+        local guildLookup=metadata.guildLookup
+        if guildDirty then
+            guildDirty=false
+            for _,plate in pairs(plates) do plate.record=plateRecord(store,region,plate,guildLookup) end
+        end
+        if not store or not (hasBlacklist() or guildLookup) then
             resetSightings()
             return
         end
@@ -302,6 +325,7 @@ function B.installSightings()
         end
         local function ownsScan()
             return world and owner==revision and store==A.store and region==A.region
+                and (not metadata.ownsGuild or metadata.ownsGuild())
         end
         -- Nil means an unavailable identity, and false means a confirmed
         -- non-match. A restriction must not rearm a continuous sighting.
@@ -377,7 +401,7 @@ function B.installSightings()
         local observedAt
         for _,unit in ipairs(units) do
             local sighting=unit.sighting
-            if sighting and not conflicts[sighting.id] and recording and needsTimestamp(sighting) then
+            if sighting and not sighting.guild and not conflicts[sighting.id] and recording and needsTimestamp(sighting) then
                 observedAt=ledger.now()
                 break
             end
@@ -388,7 +412,7 @@ function B.installSightings()
             if sighting and conflicts[sighting.id] then unit.sighting=nil
             elseif sighting and ownsScan() then
                 local needsTime=needsTimestamp(sighting)
-                unit.place=recording and (needsTime and observedAt~=nil
+                unit.place=not sighting.guild and recording and (needsTime and observedAt~=nil
                     or not needsTime and (clockAvailable or inUpdate))
                 if unit.place and not zoneRead then
                     zoneRead=true
@@ -490,7 +514,7 @@ function B.installSightings()
         end
         if visible then
             local display=visible
-            local saved=savedSighting(store,region,display.name,display.guid)
+            local saved=savedSighting(store,region,display.name,display.guid,guildLookup)
             if ownsScan() and visible==display
                 and (not same(display,saved) or display.reasons~=saved.reasons
                     or same(display,uncertain[display.id]) and not currentlySupported(display)) then hide() end
@@ -561,12 +585,12 @@ function B.installSightings()
         -- A new alert can join a brief overlap. A transient queued alert still
         -- gets its usual standalone display if either player is no longer observed.
         local display=visible
-        local staged=display and display.rosterGroup
-        if display and #queue>0 and (staged and staged==rosterGroup or not staged and clock-display.openedAt<=groupWindow)
+        local staged=display and display.stagedGroup
+        if display and #queue>0 and (staged and staged==groupToPaint or not staged and clock-display.openedAt<=groupWindow)
             and display.episode
             and episodes[display.id]==display.episode and currentlySupported(display) then
             local count, batch=display.count or 0,{}
-            local usesRoster=supported[display.id].roster
+            local needsPaintCheck=display.guild or supported[display.id].roster
             local function ownsGroup()
                 if B.testShown() or not ownsScan() or visible~=display then return false end
                 for _,item in ipairs(batch) do
@@ -581,21 +605,21 @@ function B.installSightings()
                 if (not staged or staged[entry]) and entry.region==region and age>=pollInterval and age<=pendingLifetime
                     and sighting.id~=display.id and episodes[sighting.id]==entry.episode
                     and not onCooldown(region,sighting.name) and currentlySupported(sighting) then
-                    local saved=savedSighting(store,region,sighting.name,sighting.guid)
+                    local saved=savedSighting(store,region,sighting.name,sighting.guid,guildLookup)
                     if same(saved,sighting) and saved.reasons==sighting.reasons and ownsCurrentSighting(saved) then
                         batch[#batch+1]={index=index,entry=entry}
-                        usesRoster=usesRoster or supported[sighting.id].roster
+                        needsPaintCheck=needsPaintCheck or sighting.guild or supported[sighting.id].roster
                     end
                     if not ownsScan() then return end
                 end
             end
             if #batch>0 and ownsCurrentSighting(display) and ownsGroup() then
                 if not allowsLiveBanner() then clearPlates(); suspend(); return end
-                if usesRoster and not staged and ownsGroup() then
-                    -- Keep roster members queued until the frame that will actually paint the count.
+                if needsPaintCheck and not staged and ownsGroup() then
+                    -- Roster membership and guild access can change before the count is painted.
                     local group={}
                     for _,item in ipairs(batch) do group[item.entry]=true end
-                    display.rosterGroup=group
+                    display.stagedGroup=group
                     return
                 end
                 if read(GetCurrentRegion)==region and display.appearance() and ownsGroup()
@@ -612,7 +636,7 @@ function B.installSightings()
                             return
                         end
                     end
-                    display.rosterGroup=nil
+                    display.stagedGroup=nil
                     for i=#batch,1,-1 do
                         local item=batch[i]
                         startCooldown(region,item.entry.sighting.name,bannerCooldown)
@@ -624,11 +648,12 @@ function B.installSightings()
             end
             if not ownsScan() then return end
         end
-        if staged and staged==rosterGroup and visible==display then display.rosterGroup=nil end
+        if staged and staged==groupToPaint and visible==display then display.stagedGroup=nil end
         while #queue>0 and not visible and (clockAvailable or inUpdate) do
             local entry=queue[1]
             local expired=clock-entry.at>pendingLifetime
-            local saved=not expired and entry.region==region and savedSighting(store,region,entry.sighting.name,entry.sighting.guid)
+            local saved=not expired and entry.region==region
+                and savedSighting(store,region,entry.sighting.name,entry.sighting.guid,guildLookup)
             local stillObserved=not entry.needsCurrent or ownsCurrentSighting(entry.sighting,true)
             if not world or owner~=revision then return end
             if store~=A.store or region~=A.region then pending=true; return end
@@ -697,19 +722,27 @@ function B.installSightings()
             end
         end
     end
-    local function sample(resume, rosterChanged, rosterGroup, paintElapsed)
-        clockAvailable=(next(episodes) or (A.store and hasBlacklist())) and advance()
-        if rosterChanged then rosterRetryUntil=clock+rosterSettleTime end
+    local function sample(resume, rosterChanged, groupToPaint, paintElapsed)
         resumeTest=false
         revision=revision+1
-        if scanning then pending=true; refreshUpdates(); return end
+        if scanning then
+            if rosterChanged then rosterRetryUntil=clock+rosterSettleTime end
+            pending=true
+            refreshUpdates()
+            return
+        end
         local retried=metadataRetry
         scanning,pending,metadataRetry=true,false,false
         local owner,store,region=revision,A.store,A.region
+        local guildLookup,ownsGuild
+        if world then guildLookup,ownsGuild=G.bannerLookup(region) end
+        clockAvailable=(next(episodes) or (store and (hasBlacklist() or guildLookup))) and advance()
+        if rosterChanged and owner==revision then rosterRetryUntil=clock+rosterSettleTime end
         local ledgerRevision=ledger.revision()
-        local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried}
+        local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried,
+            guildLookup=guildLookup,ownsGuild=ownsGuild}
         requested={}
-        scan(owner,resume,metadata,rosterGroup,paintElapsed)
+        scan(owner,resume,metadata,groupToPaint,paintElapsed)
         local function owns()
             return world and owner==revision and A.store==store and A.region==region
         end
@@ -756,20 +789,20 @@ function B.installSightings()
         if expired then hide() end
         local display=visible
         local count=display and display.count
-        local rosterGroup=display and display.rosterGroup
+        local groupToPaint=display and display.stagedGroup
         -- WoW may clear mouseover without delivering a second unit event.
         local rosterDue=rosterRetryUntil and (clock>=nextPoll or clock>=rosterRetryUntil)
         if rosterRetryUntil and clock>=rosterRetryUntil then rosterRetryUntil=nil end
-        if pending or expired or rosterGroup or rosterDue
+        if pending or expired or groupToPaint or rosterDue
             or ((visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then
-            sample(resumeTest,nil,rosterGroup,elapsed)
+            sample(resumeTest,nil,groupToPaint,elapsed)
         end
         expireEpisodes()
         refreshNavigation()
         if visible then
             local alpha=B.alphaAt(clock-shownAt)
             if alpha<1 then B.fade(alpha)
-            elseif visible==display and (not rosterGroup or visible.count==count) then
+            elseif visible==display and (not groupToPaint or visible.count==count) then
                 B.advanceLive(elapsed,visible.count~=count)
             end
         end
@@ -794,19 +827,25 @@ function B.installSightings()
     function B.sightingsBookChanged()
         if not world then return end
         local changed
+        local guildLookup=G.bannerLookup(A.region)
         for _,plate in pairs(plates) do
-            local record=plateRecord(A.store,A.region,plate)
+            local record=plateRecord(A.store,A.region,plate,guildLookup)
             if plate.record~=record then plate.record,changed=record,true end
         end
         if changed then sample(); return end
         for _,episode in pairs(episodes) do
             local sighting=episode.sighting
-            local saved=A.store and savedSighting(A.store,A.region,sighting.name,sighting.guid)
+            local saved=A.store and savedSighting(A.store,A.region,sighting.name,sighting.guid,guildLookup)
             if not same(sighting,saved) then
                 sample()
                 return
             end
         end
+    end
+    function B.sightingsGuildChanged()
+        if not world then return end
+        guildDirty=true
+        sample()
     end
     function B.sightingsNameplatesChanged(enabled)
         enabled=enabled==true
@@ -827,7 +866,7 @@ function B.installSightings()
         local old=plates[token]
         plateRevision=plateRevision+1
         forgetPlate(token)
-        local matched=event=="NAME_PLATE_UNIT_ADDED" and rememberPlate(token)
+        local matched=event=="NAME_PLATE_UNIT_ADDED" and rememberPlate(token,nil,G.bannerLookup(A.region))
         if matched or prior or old and old.record then sample() end
     end
     observer:SetScript("OnEvent",function(_,event)

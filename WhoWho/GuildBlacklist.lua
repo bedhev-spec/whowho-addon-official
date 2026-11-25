@@ -178,6 +178,8 @@ end
 local function notify()
     local refresh=P.Shell.RefreshGuildBlacklist
     if refresh then refresh() end
+    local sightings=P.BlacklistBanner.sightingsGuildChanged
+    if sightings then sightings() end
 end
 
 local function nativeContext()
@@ -298,6 +300,23 @@ function G.list()
         table.sort(rows,function(a,b) return a.name < b.name end)
     end
     return rows
+end
+
+function G.bannerLookup(region)
+    local current=state
+    local token=current and current.readToken
+    if not token or current.region~=region or current.data.count==0 then return end
+    local function owns()
+        return inWorld and not checking and not settling and state==current and current.readToken==token
+    end
+    if not owns() or read(IsInGuild)~=true or read(GetCurrentRegion)~=region
+        or scopeKey(region,read(member(C_Club,"GetGuildClubId")))~=current.key or not owns() then return end
+    return function(name)
+        if not owns() then return end
+        local key=N.Key(name)
+        local entry=current.data.rows[key]
+        if entry then return token..":"..key, A.reasonText(entry.reasonIds," · ") end
+    end, owns
 end
 
 local function forgetQueuedRow(current, identity)
