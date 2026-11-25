@@ -41,7 +41,7 @@ local function episodeKey(row)
 end
 
 local function hasObservation(row)
-    return row.target==true or row.mouseover==true or row.nameplate==true
+    return row.target==true or row.mouseover==true or row.nameplate==true or row.roster==true
 end
 
 local function valid(row,region)
@@ -119,18 +119,19 @@ function E.start(sighting,region,now)
     return id
 end
 
-function E.observe(id,target,mouseover,elapsed,zone,group,nameplate)
+function E.observe(id,target,mouseover,elapsed,zone,group,nameplate,roster)
     local row=active[id]
     if not row then return end
     local at=row.startedAt+math.max(0,math.floor(elapsed))
     if at<row.lastObservedAt then return end
     if at~=row.lastObservedAt or (target and not row.target) or (mouseover and not row.mouseover)
-        or (nameplate and not row.nameplate)
+        or (nameplate and not row.nameplate) or (roster and not row.roster)
         or zone~=row.zone or group~=row.groupContext then
         row.lastObservedAt=at
         row.target=row.target or target==true
         row.mouseover=row.mouseover or mouseover==true
         if nameplate then row.nameplate=true end
+        if roster then row.roster=true end
         row.zone,row.groupContext=zone,group
         revision=revision+1
     end
@@ -154,6 +155,7 @@ function E.stop(id,elapsed)
         counted.target=counted.target or row.target
         counted.mouseover=counted.mouseover or row.mouseover
         if row.nameplate then counted.nameplate=true end
+        if row.roster then counted.roster=true end
         aliases[id%limit]={id=id,countedId=counted.id,key=episodeKey(row)}
         local retained=false
         for _,saved in ipairs(rows) do

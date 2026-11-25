@@ -91,6 +91,7 @@ function B.installSightings()
     register("PLAYER_LOGOUT")
     local target=register("PLAYER_TARGET_CHANGED")
     local mouseover=register("UPDATE_MOUSEOVER_UNIT")
+    local roster=register("GROUP_ROSTER_UPDATE")
     local episodes, previous={},{}
     local plates, plateCount, platesEnabled, plateRevision={},0,false,0
     local sampled,requested,metadataRetry={},{},false
@@ -296,38 +297,51 @@ function B.installSightings()
         -- non-match. A restriction must not rearm a continuous sighting.
         local units={}
         local currentSample=sampledOwner.store==store and sampled.region==region and sampled
-        local function inspect(token, enabled, plate)
+        local function inspect(token, enabled, plate, rosterSource)
             if not ownsScan() then return end
             local sighting,evidence,memo=false,nil,false
             local function ownsUnit()
                 return ownsScan() and (not plate or plates[token]==plate)
             end
-            if enabled then
+            if enabled==nil then
+                sighting,memo=nil,nil
+            elseif enabled then
                 local available=not plate or ownsPlate(token,plate)
                 if available and ownsUnit() then
                     local recycled
-                    sighting,evidence,memo,recycled=readSighting(token,reader.worldSource(token),store,region,
+                    sighting,evidence,memo,recycled=readSighting(token,rosterSource or reader.worldSource(token),store,region,
                         currentSample and currentSample[token],metadata,ownsUnit,plate)
                     if recycled and ownsUnit() then forgetPlate(token) end
                 elseif available==nil then
                     sighting,memo=nil,nil
                 end
             end
-            units[#units+1]={token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate}
+            units[#units+1]={token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate,roster=rosterSource}
         end
         if target then inspect("target",true) end
         if mouseover then inspect("mouseover",true) end
+        local prefix,count,rosterSource
+        if roster then prefix,count,rosterSource=reader.groupRoster() end
+        local rosterUnits={}
+        for i=1,count or 0 do
+            local token=prefix..i
+            rosterUnits[token]=i
+            inspect(token,true,nil,rosterSource)
+        end
         local tokens={}
         for token,plate in pairs(plates) do
             if plate.record or previous[token] then tokens[#tokens+1]=token end
         end
         for token in pairs(previous) do
-            if token~="target" and token~="mouseover" and not plates[token] then tokens[#tokens+1]=token end
+            if token~="target" and token~="mouseover" and not plates[token] and not rosterUnits[token] then
+                tokens[#tokens+1]=token
+            end
         end
         table.sort(tokens)
         for _,token in ipairs(tokens) do
             local plate=plates[token]
-            inspect(token,plate and plate.record,plate)
+            if prefix or reader.nameplateToken(token) then inspect(token,plate and plate.record or false,plate)
+            else inspect(token,nil) end
         end
         if not ownsScan() then
             if world and owner==revision then pending=true end
@@ -370,16 +384,25 @@ function B.installSightings()
                     zone=A.text(read(GetRealZoneText))
                     if zone and not zone:find("%S") then zone=nil end
                 end
-                if unit.place and not zone and ownsScan() then unit.group=readGroupContext(unit.token) end
+                if unit.place and not zone and ownsScan() then
+                    if unit.roster then unit.group=unit.roster=="Raid" and "Raid" or "Group"
+                    else unit.group=readGroupContext(unit.token) end
+                end
             end
         end
         local function verifyUnit(unit,sighting)
             if not ownsScan() or unit.plate and not ownsPlate(unit.token,unit.plate) then return false end
+            if unit.roster then
+                local livePrefix,liveCount=reader.groupRoster()
+                if livePrefix~=prefix or liveCount<rosterUnits[unit.token] or not ownsScan() then return false end
+            end
             local name,guid=A.playerAddIdentity(unit.token,store,region,ownsScan)
             return name==sighting.name and guid==sighting.guid and ownsScan()
         end
         for _,unit in ipairs(units) do
-            if unit.sighting and (unit.place or unit.plate) and not verifyUnit(unit,unit.sighting) then unit.sighting=nil end
+            if unit.sighting and (unit.place or unit.plate or unit.roster) and not verifyUnit(unit,unit.sighting) then
+                unit.sighting=nil
+            end
         end
         local currentRegion=read(GetCurrentRegion)
         if not world or owner~=revision then return end
@@ -401,6 +424,7 @@ function B.installSightings()
                 previous[token]=sighting or nil
                 metadata.samples[token]=unit.memo
                 metadata.plateSamples[token]=plate
+                metadata.rosterSamples[token]=unit.roster
             end
             local prior=previous[token]
             if prior then present[prior.id]=prior end
@@ -414,16 +438,15 @@ function B.installSightings()
                 candidate.units[#candidate.units+1]=unit
                 if token=="target" then candidate.target=true
                 elseif token=="mouseover" then candidate.mouseover=true
-                else
-                    candidate.nameplate=true
-                end
+                elseif plate then candidate.nameplate=true
+                else candidate.roster=true end
                 if unit.place then
                     candidate.place=true
                     if not candidate.group or unit.group=="Raid" then candidate.group=unit.group end
                 end
                 if unit.evidence then
                     observations[#observations+1]={id=sighting.id,evidence=unit.evidence,
-                        owns=plate and function() return verifyUnit(unit,sighting) end or nil}
+                        owns=(plate or unit.roster) and function() return verifyUnit(unit,sighting) end or nil}
                     for _,field in ipairs({"class","faction"}) do
                         local value=unit.evidence[field]
                         if value then
@@ -445,11 +468,11 @@ function B.installSightings()
             local candidate=supported[sighting.id]
             return candidate and same(sighting,candidate.sighting)
         end
-        local function ownsCurrentSighting(sighting,plateOnly)
+        local function ownsCurrentSighting(sighting,needsCurrent)
             local candidate=supported[sighting.id]
             if not candidate or not same(candidate.sighting,sighting) then return false end
             for _,unit in ipairs(candidate.units) do
-                if (not plateOnly or unit.plate) and verifyUnit(unit,sighting) then return true end
+                if (not needsCurrent or unit.plate or unit.roster) and verifyUnit(unit,sighting) then return true end
             end
             return false
         end
@@ -466,7 +489,7 @@ function B.installSightings()
             local entry=queue[i]
             local sighting=entry.sighting
             if not currentlySupported(sighting)
-                and (entry.plateOnly or same(sighting,uncertain[sighting.id])) then discard(i) end
+                and (entry.needsCurrent or same(sighting,uncertain[sighting.id])) then discard(i) end
         end
         expireEpisodes()
         for _,episode in pairs(episodes) do
@@ -488,8 +511,8 @@ function B.installSightings()
                 episodes[sighting.id]=episode
             end
             if episode and same(sighting,episode.sighting) then
-                local plateOnly=not (candidate.target or candidate.mouseover)
-                if episode.queued and not plateOnly then episode.queued.plateOnly=false end
+                local needsCurrent=not (candidate.target or candidate.mouseover)
+                if episode.queued and not needsCurrent then episode.queued.needsCurrent=false end
                 if candidate.place then
                     if not episode.encounter then
                         local id=ledger.start(sighting,region,observedAt)
@@ -499,7 +522,7 @@ function B.installSightings()
                     local encounter=episode.encounter
                     if encounter then
                         encounter.key=ledger.observe(encounter.id,candidate.target,candidate.mouseover,
-                            clock-episode.startedClock,zone,candidate.group,candidate.nameplate) or encounter.key
+                            clock-episode.startedClock,zone,candidate.group,candidate.nameplate,candidate.roster) or encounter.key
                         -- Keep this physical episode's ID through grace expiry.
                         local entry=episode.queued
                         if entry and entry.episode==episode and not entry.encounter then entry.encounter=encounter end
@@ -512,7 +535,7 @@ function B.installSightings()
                     end
                     if not duplicate and #queue<pendingLimit then
                         local entry={sighting=sighting,episode=episode,region=region,at=clock,
-                            encounter=episode.encounter,plateOnly=plateOnly}
+                            encounter=episode.encounter,needsCurrent=needsCurrent}
                         queue[#queue+1]=entry
                         episode.queued=entry
                     elseif duplicate then
@@ -567,10 +590,10 @@ function B.installSightings()
             local entry=queue[1]
             local expired=clock-entry.at>pendingLifetime
             local saved=not expired and entry.region==region and savedSighting(store,region,entry.sighting.name,entry.sighting.guid)
-            local plateOwned=not entry.plateOnly or ownsCurrentSighting(entry.sighting,true)
+            local stillObserved=not entry.needsCurrent or ownsCurrentSighting(entry.sighting,true)
             if not world or owner~=revision then return end
             if store~=A.store or region~=A.region then pending=true; return end
-            if not plateOwned or not same(entry.sighting,saved) or entry.sighting.reasons~=saved.reasons then
+            if not stillObserved or not same(entry.sighting,saved) or entry.sighting.reasons~=saved.reasons then
                 discard(1,expired and entry.waitingForUI)
             elseif onCooldown(region,saved.name) then
                 discard(1,true)
@@ -596,7 +619,7 @@ function B.installSightings()
                 local displayRegion=read(GetCurrentRegion)
                 local testShown=B.testShown()
                 local appeared=ownsAppearance()
-                if entry.plateOnly and not ownsCurrentSighting(entry.sighting,true) then
+                if entry.needsCurrent and not ownsCurrentSighting(entry.sighting,true) then
                     if ownsScan() and queue[1]==entry then discard(1) end
                     hide()
                     return
@@ -626,7 +649,7 @@ function B.installSightings()
                 A.alertSound.playBanner(function()
                     if not ownsScan() or visible~=saved or not allowsLiveBanner() or read(GetCurrentRegion)~=region
                         or B.testShown() or not ownsAppearance()
-                        or entry.plateOnly and not ownsCurrentSighting(entry.sighting,true) then return false end
+                        or entry.needsCurrent and not ownsCurrentSighting(entry.sighting,true) then return false end
                     return ownsScan() and visible==saved
                 end)
                 return
@@ -644,7 +667,7 @@ function B.installSightings()
         scanning,pending,metadataRetry=true,false,false
         local owner,store,region=revision,A.store,A.region
         local ledgerRevision=ledger.revision()
-        local metadata={observations={},samples={},plateSamples={},requested=requested,retried=retried}
+        local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried}
         requested={}
         scan(owner,resume,metadata)
         local function owns()
@@ -661,7 +684,8 @@ function B.installSightings()
             if sampledOwner.store~=store or sampled.region~=region then sampled={} end
             sampledOwner.store,sampled.region=settled,region
             for token,memo in pairs(metadata.samples) do
-                if token=="target" or token=="mouseover" or plates[token] and plates[token]==metadata.plateSamples[token] then
+                if token=="target" or token=="mouseover" or metadata.rosterSamples[token]
+                    or plates[token] and plates[token]==metadata.plateSamples[token] then
                     sampled[token]=settleSample(settled,memo)
                 end
             end

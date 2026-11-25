@@ -276,13 +276,8 @@ function evidence.refreshCaptured(observation, name, store, region, owns)
 end
 
 local function groups(addUnit, owns)
-    local raid = read(IsInRaid)
-    if type(raid) ~= "boolean" then return end
-    local countReader = GetNumSubgroupMembers
-    if raid then countReader = GetNumGroupMembers end
-    local count = positiveInteger(read(countReader))
-    if not count or count > (raid and 40 or 4) then return end
-    local prefix, source = raid and "raid" or "party", raid and "Raid" or "Party"
+    local prefix, count, source = reader.groupRoster()
+    if not prefix then return end
     for i=1,count do
         if not owns() then return end
         if not addUnit(prefix .. i, source, owns) then return false end

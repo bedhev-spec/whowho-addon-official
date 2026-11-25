@@ -52,7 +52,7 @@ Les captures montrent l’interface en anglais.
 
 ### Quand WhoWho peut-il repérer un joueur ?
 
-WhoWho peut repérer les joueurs que vous ciblez ou survolez avec la souris. Pour qu’il lise aussi les barres de nom que Forever rend accessibles, activez **Utiliser les barres de nom visibles des joueurs** dans **Paramètres → Général → Rencontres dans le monde**.
+WhoWho peut repérer les joueurs que vous ciblez ou survolez avec la souris. Il vérifie aussi automatiquement si des joueurs de votre liste noire personnelle figurent dans votre groupe ou votre raid quand sa composition change. Pour qu’il lise aussi les barres de nom que Forever rend accessibles, activez **Utiliser les barres de nom visibles des joueurs** dans **Paramètres → Général → Rencontres dans le monde**.
 
 Pour un ami déjà ajouté, **Vérifier l’état** peut aussi le retrouver dans votre groupe ou raid actuel.
 

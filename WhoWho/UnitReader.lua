@@ -56,6 +56,15 @@ function unit.worldSource(token)
     if token == "mouseover" then return "Mouseover" end
     if unit.nameplateToken(token) then return "Nameplate" end
 end
+function unit.groupRoster()
+    local raid = read(IsInRaid)
+    if type(raid) ~= "boolean" then return end
+    local countReader = GetNumSubgroupMembers
+    if raid then countReader = GetNumGroupMembers end
+    local count = read(countReader)
+    if type(count) ~= "number" or count < 0 or count > (raid and 40 or 4) or count % 1 ~= 0 then return end
+    return raid and "raid" or "party", count, raid and "Raid" or "Party"
+end
 local function playerIdentity(token, owns, rechecking)
     if not readable(token) or type(token) ~= "string" or token == "player" or (owns and not owns()) then return end
     local exists = read(UnitExists, token)
