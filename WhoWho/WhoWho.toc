@@ -1,0 +1,44 @@
+## Interface: 16001
+## Title: WhoWho
+## Version: 0.0.0-dev
+## Notes: Local address book, Blacklist alerts and world tooltip labels.
+## IconTexture: Interface\AddOns\WhoWho\Media\MascotMain
+## SavedVariables: WhowhoPreviewDB, WhowhoAddressBookDB, WhowhoEncounterDB, WhowhoGuildBlacklistDB
+Theme.lua
+Locale.lua
+LocaleFr.lua
+LayoutMetrics.lua
+RosterModel.lua
+RosterRows.lua
+RosterFilters.lua
+BlacklistBanner.lua
+Settings.lua
+CharacterName.lua
+GuildBlacklistName.lua
+EditorDialog.lua
+Shell.lua
+Layout.lua
+Launcher.lua
+AddressBook.lua
+ManualAddressBook.lua
+NativeRead.lua
+GuildBlacklistDetails.lua
+GuildBlacklist.lua
+AlertSound.lua
+GuildRosterRead.lua
+UnitReader.lua
+PlayerEvidence.lua
+FriendInvite.lua
+TargetCheck.lua
+NameplateCheck.lua
+RosterRefresh.lua
+BatchRefresh.lua
+PlayerMenu.lua
+PlayerTooltip.lua
+WhoResult.lua
+WhoLookup.lua
+EncounterLedger.lua
+BlacklistChatMute.lua
+EncounterPane.lua
+BlacklistSightings.lua
+Bootstrap.lua
