@@ -178,6 +178,8 @@ end
 local function notify()
     local refresh=P.Shell.RefreshGuildBlacklist
     if refresh then refresh() end
+    local sightings=P.BlacklistBanner.sightingsGuildChanged
+    if sightings then sightings() end
 end
 
 local function nativeContext()
@@ -298,6 +300,30 @@ function G.list()
         table.sort(rows,function(a,b) return a.name < b.name end)
     end
     return rows
+end
+
+function G.bannerLookup(region)
+    -- Unknown membership can preserve a sighting but cannot authorize an alert.
+    if type(IsInGuild)~="function" then return end
+    if not inWorld or checking or settling then return nil,nil,true end
+    local current=state
+    local token=current and current.readToken
+    local function owns()
+        return token and inWorld and not checking and not settling and state==current and current.readToken==token
+    end
+    local guild=read(IsInGuild)
+    if guild==false then return end
+    if guild~=true or not owns() then return nil,nil,true end
+    local nativeRegion=read(GetCurrentRegion)
+    local key=scopeKey(nativeRegion,read(member(C_Club,"GetGuildClubId")))
+    if not key or key~=current.key or not owns() then return nil,nil,true end
+    if nativeRegion~=region or current.data.count==0 then return end
+    return function(name)
+        if not owns() then return end
+        local identity=N.Key(name)
+        local entry=current.data.rows[identity]
+        if entry then return key..":"..identity, A.reasonText(entry.reasonIds," · ") end
+    end, owns
 end
 
 local function forgetQueuedRow(current, identity)

@@ -50,7 +50,9 @@ Choose Default, Copper, Slate Blue, or Beige under **Settings → General**. Und
 
 ### When can WhoWho spot a player?
 
-WhoWho can spot players you target or mouse over. It also checks for Personal Blacklist matches automatically when your party or raid roster changes. Turn on **Use visible player nameplates** under **Settings → General → World sightings** to also use the nameplates that Forever makes readable.
+WhoWho can spot players you target or mouse over. It also checks for blacklist matches automatically when your party or raid roster changes. Turn on **Use visible player nameplates** under **Settings → General → World sightings** to also use the nameplates that Forever makes readable.
+
+For each banner, WhoWho checks your **Personal Blacklist** first. If there is no personal match, it checks the **Guild Blacklist** for your current guild.
 
 For a saved Friend, **Check status** can also look for them in your current party or raid.
 

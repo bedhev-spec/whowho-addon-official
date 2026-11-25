@@ -20,6 +20,16 @@ local function fresh(options)
     local units,frames={},{}
     local sounds,reads=0,0
     local restrictedTable,instance
+    local guild=101
+    if options.guildRows then
+        local scopes=options.guildScopes or {}
+        scopes["3:101"]=options.guildRows
+        e.WhowhoGuildBlacklistDB={version=1,scopes=scopes}
+        e.IsInGuild=function() return guild~=false end
+        e.C_Club={GetGuildClubId=function() return guild end}
+        e.C_ChatInfo={}
+        e.C_Timer={}
+    end
     e.WhowhoEncounterDB=options.history
     e.GetTime=function() return config.time end
     e.GetServerTime=function() return math.floor(config.time) end
@@ -98,6 +108,7 @@ local function fresh(options)
     end
     for _,plate in ipairs(options.plates or {}) do s:plate(unpack(plate)) end
     s:event("ADDON_LOADED","WhoWho")
+    if options.guildRows then s:event("PLAYER_ENTERING_WORLD") end
     for _,frame in ipairs(s.nodes) do
         if frame.events.PLAYER_LEAVING_WORLD and frame.parent==e.UIParent then s.observer=frame end
     end
@@ -106,8 +117,104 @@ local function fresh(options)
     s.reads=function() return reads end
     s.region=function(region) config.region=region end
     s.instance=function(kind) instance=kind end
+    s.guild=function(club)
+        guild=club
+        s:event("PLAYER_GUILD_UPDATE","player")
+    end
     s.units=units
     return s
+end
+
+for _,source in ipairs({"target","mouseover","nameplate","party","raid"}) do
+    local s=fresh({guildRows={["ari creek"]={rev=0,reasonIds={"griefing"}}}})
+    local e=s.e
+    if source=="nameplate" then
+        s:plate("nameplate1",ally,allyGuid,"Alliance")
+    elseif source=="party" or source=="raid" then
+        e.IsInRaid=function() return source=="raid" end
+        e.GetNumGroupMembers=function() return 1 end
+        e.GetNumSubgroupMembers=function() return 1 end
+        s.units[source.."1"]={name=ally,guid=allyGuid,faction="Alliance"}
+        s:event("GROUP_ROSTER_UPDATE")
+    else
+        s:unit(source,ally,allyGuid,"Alliance")
+    end
+    local live=e.WhowhoBlacklistLiveBanner
+    check(s:live() and live.character:GetText()==ally and live.reasons:GetText()=="Guild Blacklist · Griefing"
+        and s.sounds()==1,source.." uses a guild-only match and shows its source and reasons")
+    s:unit("target",ally,allyGuid,"Alliance")
+    check(s.sounds()==1 and not live.more:IsShown() and #s:groups()==0,
+        source.." deduplicates and keeps guild-only alerts out of personal history")
+end
+
+do
+    local s=fresh({guildRows={[ally]={rev=0,reasonIds={"griefing"}}}})
+    s:add(ally,allyGuid)
+    s:plate("nameplate1",ally,allyGuid,"Alliance")
+    s:unit("mouseover",ally,allyGuid,"Alliance")
+    local live=s.e.WhowhoBlacklistLiveBanner
+    check(s:live() and live.reasons:GetText()=="Other" and s.sounds()==1,
+        "a personal match wins over the guild reason and alerts once")
+    check(#s:groups()==1,"the personal encounter is recorded when both lists match")
+end
+
+do
+    local s=fresh({guildRows={[ally]={rev=0},[hostile]={rev=0}}})
+    s:unit("target",ally,allyGuid,"Alliance")
+    local live=s.e.WhowhoBlacklistLiveBanner
+    check(s:live() and live.reasons:GetText()=="Guild Blacklist","older guild rows without reasons still alert")
+    s:unit("mouseover",hostile,hostileGuid,"Horde")
+    s:tick(.25)
+    s.guild(false)
+    s:tick(.25)
+    check(not s:live() and s.sounds()==1,"leaving the guild cancels live and queued guild alerts")
+end
+
+do
+    local s=fresh({guildRows={},guildScopes={["3:102"]={[ally]={rev=0}}}})
+    s:plate("nameplate1",ally,allyGuid,"Alliance")
+    check(not s:live(),"a cached row from another guild cannot alert")
+    s.guild(102)
+    check(s:live() and s.sounds()==1,"a settled guild switch reevaluates a visible plate in the new guild")
+end
+
+do
+    local s=fresh({guildRows={[hostile]={rev=0}}})
+    s:add(ally,allyGuid)
+    s:unit("target",ally,allyGuid,"Alliance")
+    s:unit("mouseover",hostile,hostileGuid,"Horde")
+    local live=s.e.WhowhoBlacklistLiveBanner
+    s:tick(.25)
+    s.guild(false)
+    s:tick(.18)
+    check(s:live() and live.character:GetText()==ally and not live.more:IsShown(),
+        "losing guild access before paint drops the guild-only count from a personal banner")
+end
+
+for _,source in ipairs({"target","nameplate"}) do
+    local s=fresh({guildRows={[ally]={rev=0}}})
+    local function seePlayer()
+        if source=="target" then s:unit("target",ally,allyGuid,"Alliance")
+        else s:plate("nameplate1",ally,allyGuid,"Alliance") end
+    end
+    seePlayer()
+    check(s:live() and s.sounds()==1,source.." alerts once for the guild member's first sighting")
+    for _=1,3 do
+        s:tick(31)
+        local nativeClub=s.e.C_Club.GetGuildClubId
+        s.e.C_Club.GetGuildClubId=function() return nil end
+        s:event("INITIAL_CLUBS_LOADED")
+        s:tick(6)
+        s.e.C_Club.GetGuildClubId=nativeClub
+        s:event("INITIAL_CLUBS_LOADED")
+        check(not s:live() and s.sounds()==1,
+            source.." keeps a handled sighting across unavailable guild data and a new read lease")
+    end
+    if source=="target" then s:unit("target",nil)
+    else s:removePlate("nameplate1") end
+    s:tick(6)
+    seePlayer()
+    check(s:live() and s.sounds()==2,source.." alerts again after a confirmed new sighting")
 end
 
 do
