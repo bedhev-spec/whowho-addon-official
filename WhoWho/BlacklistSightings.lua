@@ -116,6 +116,7 @@ function B.installSightings()
     local world, scanning, pending, updating, revision=true,false,false,false,0
     local resumeTest, suspended=false,false
     local suspendedSightings, rosterRetryUntil
+    local carriedRegion
     local inUpdate, clockAvailable=false,false
     local update
     local function hide()
@@ -143,6 +144,7 @@ function B.installSightings()
     local function resetSightings()
         for _,episode in pairs(episodes) do stopEncounter(episode,clock) end
         episodes,previous,queue={},{},{}
+        carriedRegion=nil
         sampled,metadataRetry={},false
         rosterRetryUntil=nil
         sampledOwner.store=nil
@@ -152,6 +154,18 @@ function B.installSightings()
     local function rememberSightings()
         suspendedSightings=suspendedSightings or {}
         for _,sighting in pairs(previous) do suspendedSightings[sighting.id]=sighting end
+    end
+    local function carryHandledRoster()
+        local seen, handled={},{}
+        for token,sighting in pairs(previous) do
+            local episode=episodes[sighting.id]
+            if episode and episode.handled and same(sighting,episode.sighting)
+                and (token:match("^party%d+$") or token:match("^raid%d+$")) then
+                seen[token]=sighting
+                handled[sighting.id]={sighting=sighting,handled=true}
+            end
+        end
+        return seen,handled
     end
     local function suspend()
         rosterRetryUntil=nil
@@ -289,6 +303,10 @@ function B.installSightings()
     local function scan(owner, resume, metadata, rosterGroup, paintElapsed)
         local store,region=A.store,A.region
         if not world or owner~=revision then return end
+        if carriedRegion and carriedRegion~=region then
+            resetSightings()
+            if not world or owner~=revision then return end
+        end
         if not store or not hasBlacklist() then
             resetSightings()
             return
@@ -832,10 +850,16 @@ function B.installSightings()
     end
     observer:SetScript("OnEvent",function(_,event)
         if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
-            if event=="PLAYER_LEAVING_WORLD" then rememberSightings() end
+            local seen,handled={},{}
+            carriedRegion=nil
+            if event=="PLAYER_LEAVING_WORLD" then
+                rememberSightings()
+                seen,handled=carryHandledRoster()
+                if next(seen) then carriedRegion=A.region end
+            end
             world,pending,revision=false,false,revision+1
             local oldEpisodes=episodes
-            episodes,previous,queue={},{},{}
+            episodes,previous,queue=handled,seen,{}
             clearPlates()
             sampled,requested,metadataRetry={},{},false
             sampledOwner.store=nil
