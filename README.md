@@ -1,5 +1,3 @@
-# WhoWho
-
 **English** · [Français](README.fr.md)
 
 ![WhoWho banner with the addon mascot](.github/readme/banner.png)
