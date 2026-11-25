@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  publish:
+    name: Publish addon ZIP
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source and build ZIP
+        run: |
+          git merge-base --is-ancestor HEAD refs/remotes/origin/dev
+          python3 tools/package.py "$RELEASE_TAG"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag_ref="refs/tags/$RELEASE_TAG"
+          refs=$(git ls-remote --exit-code origin "$tag_ref" "$tag_ref^{}")
+          tagged_commit=$(awk -v ref="$tag_ref" '$2 == ref { tag = $1 } $2 == ref "^{}" { peeled = $1 } END { print (peeled ? peeled : tag) }' <<< "$refs")
+          if [[ "$tagged_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "::error::Release tag moved since this run started."
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          base_version="${version%-rc.*}"
+          release_title="WhoWho ${base_version%.0}"
+          release_flags=()
+          if [[ "$version" == *-rc.* ]]; then
+            release_title+=" RC${version##*-rc.}"
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$RELEASE_TAG" "dist/WhoWho-$version.zip" \
+            --verify-tag --title "$release_title" --generate-notes "${release_flags[@]}"
