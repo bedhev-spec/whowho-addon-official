@@ -1,4 +1,4 @@
-# WhoWho
+**English** · [Français](README.fr.md)
 
 ![WhoWho banner with the addon mascot](.github/readme/banner.png)
 
@@ -16,7 +16,11 @@ If someone earns a spot on your **Personal Blacklist**, pick one or more reasons
 
 Use the **Guild Blacklist** to share selected entries with guildmates who use WhoWho.
 
-From supported chat messages, right-click a name and choose **WhoWho Add**, then **Friends** or **Blacklist**. If you’re typing the name yourself, enter it as it appears, including both parts when shown.
+### Quick Add
+
+Right-click a character's name in supported chat messages, or right-click their target, focus, party, or raid frame. Choose **WhoWho Add**, then **Friends** or **Blacklist**. The menu appears when Forever gives WhoWho enough information to identify the character.
+
+You can also target a player and click **Add entry** in **Personal Blacklist** to fill in their name. To enter a name yourself, use **Add friend** in Friends or **Add entry** in either Blacklist. Type the name as it appears, including both parts when shown.
 
 ## Make it yours
 
@@ -47,6 +51,10 @@ Choose Default, Copper, Slate Blue, or Beige under **Settings → General**. Und
 ### When can WhoWho spot a player?
 
 WhoWho can spot players you target or mouse over. Turn on **Use visible player nameplates** under **Settings → General → World sightings** to also use the nameplates that Forever makes readable.
+
+### Can WhoWho find players from the other faction?
+
+You can add players from either faction. WhoWho can spot an opposing player nearby when Forever makes their character information available. **Who** lookups are limited to your own faction, so a failed lookup for someone from the other faction doesn't tell you whether they're online.
 
 ### Do my lists follow me to my other characters?
 

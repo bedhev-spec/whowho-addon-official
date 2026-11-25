@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest a change or addition to WhoWho.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What would you like WhoWho to do, and when would you use it?
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots-or-video
+    attributes:
+      label: Screenshots or video
+      description: If it helps explain your idea, attach a screenshot or video here, or paste a link.

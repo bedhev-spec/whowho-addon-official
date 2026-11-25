@@ -17,11 +17,27 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 2
+      # Keep the required check present even when only README assets change.
+      - name: Check for changes that need tests
+        id: changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          # The first parent of the PR merge commit is the base branch tip.
+          changed=$(git diff --name-only --no-renames HEAD^1 HEAD -- . \
+            ':(exclude)README.md' ':(exclude)README.fr.md' ':(exclude).github/readme/')
+          if [[ -z "$changed" ]]; then
+            echo 'readme_only=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v6
+        if: steps.changes.outputs.readme_only != 'true'
         with:
           node-version: '24'
           package-manager-cache: false
       - name: Install Lua test runner
+        if: steps.changes.outputs.readme_only != 'true'
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Run addon and packaging tests
+        if: steps.changes.outputs.readme_only != 'true'
         run: python3 tests/run_tests.py
