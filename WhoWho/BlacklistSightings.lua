@@ -55,7 +55,11 @@ local function readSighting(token, source, store, region, sampled, metadata, own
     if not name then return nil end
     if plate and (plate.name~=name or plate.guid~=guid) then return false,nil,false,true end
     local sighting,known=savedSighting(store,region,name,guid,metadata.guildLookup)
-    if not sighting then return false,nil,false end
+    if not sighting then
+        local prior=metadata.previous[token]
+        if metadata.guildUnavailable and prior and prior.guild and prior.name==name and prior.guid==guid then return end
+        return false,nil,false
+    end
     if sighting.guild then return sighting,nil,false end
     local repeated=same(sighting,sampled)
     if repeated and (not sampled.incomplete or not (retry or metadata.requested[token])) then return sighting end
@@ -132,6 +136,7 @@ function B.installSightings()
     local guildDirty=false
     local resumeTest, suspended=false,false
     local suspendedSightings, rosterRetryUntil
+    local carriedRegion
     local inUpdate, clockAvailable=false,false
     local update
     local function hide()
@@ -159,6 +164,7 @@ function B.installSightings()
     local function resetSightings()
         for _,episode in pairs(episodes) do stopEncounter(episode,clock) end
         episodes,previous,queue={},{},{}
+        carriedRegion=nil
         sampled,metadataRetry={},false
         rosterRetryUntil=nil
         sampledOwner.store=nil
@@ -168,6 +174,18 @@ function B.installSightings()
     local function rememberSightings()
         suspendedSightings=suspendedSightings or {}
         for _,sighting in pairs(previous) do suspendedSightings[sighting.id]=sighting end
+    end
+    local function carryHandledRoster()
+        local seen, handled={},{}
+        for token,sighting in pairs(previous) do
+            local episode=episodes[sighting.id]
+            if episode and episode.handled and same(sighting,episode.sighting)
+                and (token:match("^party%d+$") or token:match("^raid%d+$")) then
+                seen[token]=sighting
+                handled[sighting.id]={sighting=sighting,handled=true}
+            end
+        end
+        return seen,handled
     end
     local function suspend()
         rosterRetryUntil=nil
@@ -307,12 +325,16 @@ function B.installSightings()
     local function scan(owner, resume, metadata, groupToPaint, paintElapsed)
         local store,region=A.store,A.region
         if not world or owner~=revision then return end
+        if carriedRegion and carriedRegion~=region then
+            resetSightings()
+            if not world or owner~=revision then return end
+        end
         local guildLookup=metadata.guildLookup
         if guildDirty then
             guildDirty=false
             for _,plate in pairs(plates) do plate.record=plateRecord(store,region,plate,guildLookup) end
         end
-        if not store or not (hasBlacklist() or guildLookup) then
+        if not store or not (hasBlacklist() or guildLookup or metadata.guildUnavailable and next(previous)) then
             resetSightings()
             return
         end
@@ -374,7 +396,10 @@ function B.installSightings()
         table.sort(tokens)
         for _,token in ipairs(tokens) do
             local plate=plates[token]
-            if reader.nameplateToken(token) then inspect(token,plate and plate.record or false,plate)
+            if reader.nameplateToken(token) then
+                local prior=previous[token]
+                local enabled=plate and (plate.record or prior and prior.guild and (guildLookup or metadata.guildUnavailable))
+                inspect(token,enabled or false,plate)
             elseif prefix then inspect(token,false,nil,rosterSource)
             else inspect(token,nil,nil,token:sub(1,4)=="raid" and "Raid" or "Party") end
         end
@@ -734,13 +759,13 @@ function B.installSightings()
         local retried=metadataRetry
         scanning,pending,metadataRetry=true,false,false
         local owner,store,region=revision,A.store,A.region
-        local guildLookup,ownsGuild
-        if world then guildLookup,ownsGuild=G.bannerLookup(region) end
+        local guildLookup,ownsGuild,guildUnavailable
+        if world then guildLookup,ownsGuild,guildUnavailable=G.bannerLookup(region) end
         clockAvailable=(next(episodes) or (store and (hasBlacklist() or guildLookup))) and advance()
         if rosterChanged and owner==revision then rosterRetryUntil=clock+rosterSettleTime end
         local ledgerRevision=ledger.revision()
         local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried,
-            guildLookup=guildLookup,ownsGuild=ownsGuild}
+            guildLookup=guildLookup,ownsGuild=ownsGuild,guildUnavailable=guildUnavailable,previous=previous}
         requested={}
         scan(owner,resume,metadata,groupToPaint,paintElapsed)
         local function owns()
@@ -871,10 +896,16 @@ function B.installSightings()
     end
     observer:SetScript("OnEvent",function(_,event)
         if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
-            if event=="PLAYER_LEAVING_WORLD" then rememberSightings() end
+            local seen,handled={},{}
+            carriedRegion=nil
+            if event=="PLAYER_LEAVING_WORLD" then
+                rememberSightings()
+                seen,handled=carryHandledRoster()
+                if next(seen) then carriedRegion=A.region end
+            end
             world,pending,revision=false,false,revision+1
             local oldEpisodes=episodes
-            episodes,previous,queue={},{},{}
+            episodes,previous,queue=handled,seen,{}
             clearPlates()
             sampled,requested,metadataRetry={},{},false
             sampledOwner.store=nil

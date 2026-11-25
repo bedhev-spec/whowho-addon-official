@@ -303,19 +303,26 @@ function G.list()
 end
 
 function G.bannerLookup(region)
+    -- Unknown membership can preserve a sighting but cannot authorize an alert.
+    if type(IsInGuild)~="function" then return end
+    if not inWorld or checking or settling then return nil,nil,true end
     local current=state
     local token=current and current.readToken
-    if not token or current.region~=region or current.data.count==0 then return end
     local function owns()
-        return inWorld and not checking and not settling and state==current and current.readToken==token
+        return token and inWorld and not checking and not settling and state==current and current.readToken==token
     end
-    if not owns() or read(IsInGuild)~=true or read(GetCurrentRegion)~=region
-        or scopeKey(region,read(member(C_Club,"GetGuildClubId")))~=current.key or not owns() then return end
+    local guild=read(IsInGuild)
+    if guild==false then return end
+    if guild~=true or not owns() then return nil,nil,true end
+    local nativeRegion=read(GetCurrentRegion)
+    local key=scopeKey(nativeRegion,read(member(C_Club,"GetGuildClubId")))
+    if not key or key~=current.key or not owns() then return nil,nil,true end
+    if nativeRegion~=region or current.data.count==0 then return end
     return function(name)
         if not owns() then return end
-        local key=N.Key(name)
-        local entry=current.data.rows[key]
-        if entry then return token..":"..key, A.reasonText(entry.reasonIds," · ") end
+        local identity=N.Key(name)
+        local entry=current.data.rows[identity]
+        if entry then return key..":"..identity, A.reasonText(entry.reasonIds," · ") end
     end, owns
 end
 

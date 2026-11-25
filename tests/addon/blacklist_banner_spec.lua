@@ -104,6 +104,38 @@ local function fresh(preferences, unsupportedEvent, history, addressBook)
 end
 
 local function shown(frame) return frame and frame:IsShown() end
+do
+    local _,s,e=fresh()
+    local count=1
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return count end
+    local sounds=0
+    e.C_Sound={PlaySoundWithOptions=function() sounds=sounds+1 end}
+    s:add("Continuing Member","continuing")
+    s:set("party1","Continuing Member","continuing")
+    s:event("GROUP_ROSTER_UPDATE")
+    local live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and sounds==1,"the first roster sighting alerts")
+    for _=1,3 do
+        s:tick(31)
+        s:event("PLAYER_LEAVING_WORLD")
+        count=nil
+        s:event("PLAYER_ENTERING_WORLD")
+        s:tick(.25)
+        count=1
+        s:event("GROUP_ROSTER_UPDATE")
+        check(not shown(live) and sounds==1,"loading and a late roster snapshot do not rearm the same member")
+    end
+    count=0
+    s:set("party1",nil)
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(6)
+    count=1
+    s:set("party1","Continuing Member","continuing")
+    s:event("GROUP_ROSTER_UPDATE")
+    check(shown(live) and sounds==2,"a confirmed departure past the grace period allows a real rejoin alert")
+end
+
 local function known(A, record)
     local current=A.store.get(record.id)
     return current and current.lastKnown or {}

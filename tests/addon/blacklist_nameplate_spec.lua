@@ -191,6 +191,32 @@ do
         "losing guild access before paint drops the guild-only count from a personal banner")
 end
 
+for _,source in ipairs({"target","nameplate"}) do
+    local s=fresh({guildRows={[ally]={rev=0}}})
+    local function seePlayer()
+        if source=="target" then s:unit("target",ally,allyGuid,"Alliance")
+        else s:plate("nameplate1",ally,allyGuid,"Alliance") end
+    end
+    seePlayer()
+    check(s:live() and s.sounds()==1,source.." alerts once for the guild member's first sighting")
+    for _=1,3 do
+        s:tick(31)
+        local nativeClub=s.e.C_Club.GetGuildClubId
+        s.e.C_Club.GetGuildClubId=function() return nil end
+        s:event("INITIAL_CLUBS_LOADED")
+        s:tick(6)
+        s.e.C_Club.GetGuildClubId=nativeClub
+        s:event("INITIAL_CLUBS_LOADED")
+        check(not s:live() and s.sounds()==1,
+            source.." keeps a handled sighting across unavailable guild data and a new read lease")
+    end
+    if source=="target" then s:unit("target",nil)
+    else s:removePlate("nameplate1") end
+    s:tick(6)
+    seePlayer()
+    check(s:live() and s.sounds()==2,source.." alerts again after a confirmed new sighting")
+end
+
 do
     local s=fresh()
     local opposite=s:add(hostile,hostileGuid)
