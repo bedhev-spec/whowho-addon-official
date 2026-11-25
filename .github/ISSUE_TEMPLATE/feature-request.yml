@@ -1,5 +1,6 @@
 name: Feature request
 description: Suggest a change or addition to WhoWho.
+labels: [enhancement]
 body:
   - type: textarea
     id: description

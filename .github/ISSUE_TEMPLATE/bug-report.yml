@@ -1,5 +1,6 @@
 name: Bug report
 description: Report something that went wrong in WhoWho.
+labels: [bug]
 body:
   - type: textarea
     id: description
