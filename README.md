@@ -1,5 +1,7 @@
 # WhoWho
 
+**English** · [Français](README.fr.md)
+
 ![WhoWho banner with the addon mascot](.github/readme/banner.png)
 
 Remember the tank who pulled the whole room and somehow saved the run? How about the rogue who spent half the evening camping your corpse? WhoWho keeps a personal Friends list and Blacklist for World of Warcraft: Forever, with notes, live alerts, and a record of your run-ins.

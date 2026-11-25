@@ -26,7 +26,7 @@ jobs:
         run: |
           # The first parent of the PR merge commit is the base branch tip.
           changed=$(git diff --name-only --no-renames HEAD^1 HEAD -- . \
-            ':(exclude)README.md' ':(exclude).github/readme/')
+            ':(exclude)README.md' ':(exclude)README.fr.md' ':(exclude).github/readme/')
           if [[ -z "$changed" ]]; then
             echo 'readme_only=true' >> "$GITHUB_OUTPUT"
           fi
