@@ -8,6 +8,7 @@ local absenceGrace=5
 local bannerCooldown=30
 local newEntryCooldown=300
 local pollInterval=.25
+local rosterSettleTime=1
 local groupWindow=3
 local pendingLifetime, pendingLimit=12,8
 local plateLimit=256
@@ -114,6 +115,7 @@ function B.installSightings()
     end
     local world, scanning, pending, updating, revision=true,false,false,false,0
     local resumeTest, suspended=false,false
+    local suspendedSightings, rosterRetryUntil
     local inUpdate, clockAvailable=false,false
     local update
     local function hide()
@@ -142,13 +144,20 @@ function B.installSightings()
         for _,episode in pairs(episodes) do stopEncounter(episode,clock) end
         episodes,previous,queue={},{},{}
         sampled,metadataRetry={},false
+        rosterRetryUntil=nil
         sampledOwner.store=nil
         resumeTest=false
         hide()
     end
+    local function rememberSightings()
+        suspendedSightings=suspendedSightings or {}
+        for _,sighting in pairs(previous) do suspendedSightings[sighting.id]=sighting end
+    end
     local function suspend()
+        rosterRetryUntil=nil
         if suspended then return end
         suspended=true
+        rememberSightings()
         resetSightings()
     end
     local function pruneCooldowns(armDeferred)
@@ -190,7 +199,8 @@ function B.installSightings()
         end
     end
     local function refreshUpdates()
-        local needed=not not (world and (pending or visible or previous.mouseover or #queue>0 or trackingPlate()))
+        local needed=not not (world and (pending or rosterRetryUntil or visible or previous.mouseover
+            or #queue>0 or trackingPlate()))
         if world and not needed then
             for _,episode in pairs(episodes) do
                 if episode.absentSince or episode.encounterAbsentSince then needed=true; break end
@@ -276,7 +286,7 @@ function B.installSightings()
         if visible==nil then return nil end
         return visible and rawequal(frame,plate.frame)
     end
-    local function scan(owner, resume, metadata)
+    local function scan(owner, resume, metadata, rosterGroup, paintElapsed)
         local store,region=A.store,A.region
         if not world or owner~=revision then return end
         if not store or not hasBlacklist() then
@@ -340,8 +350,9 @@ function B.installSightings()
         table.sort(tokens)
         for _,token in ipairs(tokens) do
             local plate=plates[token]
-            if prefix or reader.nameplateToken(token) then inspect(token,plate and plate.record or false,plate)
-            else inspect(token,nil) end
+            if reader.nameplateToken(token) then inspect(token,plate and plate.record or false,plate)
+            elseif prefix then inspect(token,false,nil,rosterSource)
+            else inspect(token,nil,nil,token:sub(1,4)=="raid" and "Raid" or "Party") end
         end
         if not ownsScan() then
             if world and owner==revision then pending=true end
@@ -411,20 +422,21 @@ function B.installSightings()
             resetSightings()
             return
         end
-        local resumed=suspended
-        suspended=false
+        local resumed,resumedSightings=suspended,suspendedSightings
+        suspended,suspendedSightings=false,nil
         local present, supported, uncertain, candidates={},{},{},{}
         local observations=metadata.observations
         for _,unit in ipairs(units) do
             local token,sighting,plate=unit.token,unit.sighting,unit.plate
+            metadata.rosterSamples[token]=unit.roster
             if sighting==nil then
                 local prior=previous[token]
                 if prior then uncertain[prior.id]=prior end
+                if unit.roster then metadata.samples[token]=false end
             else
                 previous[token]=sighting or nil
                 metadata.samples[token]=unit.memo
                 metadata.plateSamples[token]=plate
-                metadata.rosterSamples[token]=unit.roster
             end
             local prior=previous[token]
             if prior then present[prior.id]=prior end
@@ -507,7 +519,9 @@ function B.installSightings()
             if not episode and (not resume or resumed) then
                 -- A sighting carried out of an instance or begun during cooldown
                 -- stays quiet until all of its sources clear.
-                episode={sighting=sighting,handled=resumed or onCooldown(region,sighting.name)}
+                local newRosterSighting=candidate.roster
+                    and not same(sighting,resumedSightings and resumedSightings[sighting.id])
+                episode={sighting=sighting,handled=(resumed and not newRosterSighting) or onCooldown(region,sighting.name)}
                 episodes[sighting.id]=episode
             end
             if episode and same(sighting,episode.sighting) then
@@ -547,9 +561,12 @@ function B.installSightings()
         -- A new alert can join a brief overlap. A transient queued alert still
         -- gets its usual standalone display if either player is no longer observed.
         local display=visible
-        if display and #queue>0 and clock-display.openedAt<=groupWindow and display.episode
+        local staged=display and display.rosterGroup
+        if display and #queue>0 and (staged and staged==rosterGroup or not staged and clock-display.openedAt<=groupWindow)
+            and display.episode
             and episodes[display.id]==display.episode and currentlySupported(display) then
             local count, batch=display.count or 0,{}
+            local usesRoster=supported[display.id].roster
             local function ownsGroup()
                 if B.testShown() or not ownsScan() or visible~=display then return false end
                 for _,item in ipairs(batch) do
@@ -561,20 +578,41 @@ function B.installSightings()
                 if count+#batch>=pendingLimit then break end
                 local sighting=entry.sighting
                 local age=clock-entry.at
-                if entry.region==region and age>=pollInterval and age<=pendingLifetime
+                if (not staged or staged[entry]) and entry.region==region and age>=pollInterval and age<=pendingLifetime
                     and sighting.id~=display.id and episodes[sighting.id]==entry.episode
                     and not onCooldown(region,sighting.name) and currentlySupported(sighting) then
                     local saved=savedSighting(store,region,sighting.name,sighting.guid)
                     if same(saved,sighting) and saved.reasons==sighting.reasons and ownsCurrentSighting(saved) then
                         batch[#batch+1]={index=index,entry=entry}
+                        usesRoster=usesRoster or supported[sighting.id].roster
                     end
                     if not ownsScan() then return end
                 end
             end
             if #batch>0 and ownsCurrentSighting(display) and ownsGroup() then
                 if not allowsLiveBanner() then clearPlates(); suspend(); return end
+                if usesRoster and not staged and ownsGroup() then
+                    -- Keep roster members queued until the frame that will actually paint the count.
+                    local group={}
+                    for _,item in ipairs(batch) do group[item.entry]=true end
+                    display.rosterGroup=group
+                    return
+                end
                 if read(GetCurrentRegion)==region and display.appearance() and ownsGroup()
                     and B.addLive(count+#batch,ownsGroup) then
+                    if staged then
+                        local function ownsPaint()
+                            return display.appearance() and ownsGroup()
+                        end
+                        if not B.advanceLive(paintElapsed,false,ownsPaint) or not ownsPaint() then
+                            if visible==display then
+                                hide()
+                                if world and #queue>0 then pending=true end
+                            end
+                            return
+                        end
+                    end
+                    display.rosterGroup=nil
                     for i=#batch,1,-1 do
                         local item=batch[i]
                         startCooldown(region,item.entry.sighting.name,bannerCooldown)
@@ -586,6 +624,7 @@ function B.installSightings()
             end
             if not ownsScan() then return end
         end
+        if staged and staged==rosterGroup and visible==display then display.rosterGroup=nil end
         while #queue>0 and not visible and (clockAvailable or inUpdate) do
             local entry=queue[1]
             local expired=clock-entry.at>pendingLifetime
@@ -658,8 +697,9 @@ function B.installSightings()
             end
         end
     end
-    local function sample(resume)
+    local function sample(resume, rosterChanged, rosterGroup, paintElapsed)
         clockAvailable=(next(episodes) or (A.store and hasBlacklist())) and advance()
+        if rosterChanged then rosterRetryUntil=clock+rosterSettleTime end
         resumeTest=false
         revision=revision+1
         if scanning then pending=true; refreshUpdates(); return end
@@ -669,7 +709,7 @@ function B.installSightings()
         local ledgerRevision=ledger.revision()
         local metadata={observations={},samples={},plateSamples={},rosterSamples={},requested=requested,retried=retried}
         requested={}
-        scan(owner,resume,metadata)
+        scan(owner,resume,metadata,rosterGroup,paintElapsed)
         local function owns()
             return world and owner==revision and A.store==store and A.region==region
         end
@@ -716,14 +756,22 @@ function B.installSightings()
         if expired then hide() end
         local display=visible
         local count=display and display.count
+        local rosterGroup=display and display.rosterGroup
         -- WoW may clear mouseover without delivering a second unit event.
-        if pending or expired or ((visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then sample(resumeTest) end
+        local rosterDue=rosterRetryUntil and (clock>=nextPoll or clock>=rosterRetryUntil)
+        if rosterRetryUntil and clock>=rosterRetryUntil then rosterRetryUntil=nil end
+        if pending or expired or rosterGroup or rosterDue
+            or ((visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then
+            sample(resumeTest,nil,rosterGroup,elapsed)
+        end
         expireEpisodes()
         refreshNavigation()
         if visible then
             local alpha=B.alphaAt(clock-shownAt)
             if alpha<1 then B.fade(alpha)
-            elseif visible==display then B.advanceLive(elapsed,visible.count~=count) end
+            elseif visible==display and (not rosterGroup or visible.count==count) then
+                B.advanceLive(elapsed,visible.count~=count)
+            end
         end
         inUpdate=false
         refreshUpdates()
@@ -784,13 +832,14 @@ function B.installSightings()
     end
     observer:SetScript("OnEvent",function(_,event)
         if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
+            if event=="PLAYER_LEAVING_WORLD" then rememberSightings() end
             world,pending,revision=false,false,revision+1
             local oldEpisodes=episodes
             episodes,previous,queue={},{},{}
             clearPlates()
             sampled,requested,metadataRetry={},{},false
             sampledOwner.store=nil
-            resumeTest=false
+            resumeTest,rosterRetryUntil=false,nil
             hide()
             if next(oldEpisodes) then advance() end
             for _,episode in pairs(oldEpisodes) do stopEncounter(episode,clock) end
@@ -798,12 +847,12 @@ function B.installSightings()
         elseif event=="PLAYER_ENTERING_WORLD" then
             world=true
             seedPlates()
-            sample()
+            sample(nil,roster)
         elseif world then
             if event=="PLAYER_TARGET_CHANGED" then requested.target=true end
             if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover=true end
             if event=="ZONE_CHANGED_NEW_AREA" then seedPlates() end
-            sample()
+            sample(nil,event=="GROUP_ROSTER_UPDATE")
         end
     end)
 end

@@ -218,6 +218,145 @@ do
 end
 
 do
+    local _,s,e=fresh()
+    local rosterSize=1
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return rosterSize end
+    s:add("Primary Member","main")
+    s:add("Departing Member","departing")
+    s:add("Staying Member","staying")
+    s:set("party1","Primary Member","main")
+    s:event("GROUP_ROSTER_UPDATE")
+    local live=e.WhowhoBlacklistLiveBanner
+    rosterSize=3
+    s:set("party2","Staying Member","staying")
+    s:set("party3","Departing Member","departing")
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(.25)
+    check(not live.more:IsShown(),"a roster overlap waits until the following frame to paint its count")
+    rosterSize=2
+    s:set("party3",nil)
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(.18)
+    check(live.more:IsShown() and live.more:GetText()=="+1 more",
+        "a member leaving before grouped paint is dropped while the remaining member counts")
+end
+
+for _,interruption in ipairs({"roster","visibility"}) do
+    local _,s,e=fresh()
+    local rosterSize=1
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return rosterSize end
+    s:add("Primary Member","main")
+    s:add("Departing Member","departing")
+    s:set("party1","Primary Member","main")
+    s:event("GROUP_ROSTER_UPDATE")
+    local live=e.WhowhoBlacklistLiveBanner
+    rosterSize=2
+    s:set("party2","Departing Member","departing")
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(.25)
+    local setText=live.more.SetText
+    live.more.SetText=function(self,text)
+        setText(self,text)
+        self.SetText=setText
+        if interruption=="visibility" then
+            e.UIParent:Hide()
+        else
+            rosterSize=1
+            s:set("party2",nil)
+            s:event("GROUP_ROSTER_UPDATE")
+        end
+    end
+    if interruption=="visibility" then s.advance(1) end
+    s:tick(.18)
+    check(not shown(live),interruption.." changes during paint cancel the old count")
+    if interruption=="visibility" then
+        e.UIParent:Show()
+        s:tick(.25)
+    else
+        rosterSize=2
+        s:set("party2","Departing Member","departing")
+        s:event("GROUP_ROSTER_UPDATE")
+    end
+    check(shown(live) and live.character:GetText()=="Departing Member",
+        "a canceled grouped count does not consume the member's cooldown after "..interruption.." changes")
+end
+
+for _,unreadable in ipairs({false,true}) do
+    local _,s,e=fresh()
+    local rosterSize=1
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return rosterSize end
+    s:add("Retry Member","retry")
+    s:set("party1","Retry Member","retry")
+    e.UnitClass=function() return "Mage","MAGE" end
+    e.GetServerTime=function() return nil end
+    s:event("GROUP_ROSTER_UPDATE")
+    check(shown(e.WhowhoBlacklistLiveBanner),"a pending metadata retry still allows the alert")
+    rosterSize=0
+    if unreadable then rosterSize=nil end
+    s:set("party1",nil)
+    s:event("GROUP_ROSTER_UPDATE")
+    for _=1,60 do s:tick(.25) end
+    check(not s.observer:GetScript("OnUpdate"),"a departed or unreadable roster slot cannot retain a metadata retry")
+end
+
+do
+    local _,s,e=fresh()
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return 1 end
+    s:add("Late Member","late")
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(.25)
+    s:set("party1","Late Member","late")
+    s:tick(.25)
+    local live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and live.character:GetText()=="Late Member",
+        "the roster scan finds a late unit token without another group event")
+end
+
+do
+    local _,s,e=fresh()
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return 1 end
+    s:add("Late Member","late")
+    s:event("GROUP_ROSTER_UPDATE")
+    for _=1,6 do s:tick(.25) end
+    check(not s.observer:GetScript("OnUpdate"),"roster settling stops after its bounded retry window")
+end
+
+for _,loading in ipairs({false,true}) do
+    local _,s,e=fresh()
+    local rosterSize=1
+    local kind
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return rosterSize end
+    e.IsInInstance=function() return kind~=nil,kind end
+    s:add("Continuing Member","continuing")
+    s:add("Outdoor Member","outdoor")
+    s:set("party1","Continuing Member","continuing")
+    s:event("GROUP_ROSTER_UPDATE")
+    kind="party"
+    if loading then
+        s:event("PLAYER_LEAVING_WORLD")
+        s:event("PLAYER_ENTERING_WORLD")
+    else
+        s:event("ZONE_CHANGED_NEW_AREA")
+    end
+    s.advance(40)
+    if loading then s:event("PLAYER_LEAVING_WORLD") end
+    kind=nil
+    rosterSize=2
+    s:set("party2","Outdoor Member","outdoor")
+    s:event("GROUP_ROSTER_UPDATE")
+    s:event("PLAYER_ENTERING_WORLD")
+    local live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and live.character:GetText()=="Outdoor Member",
+        "the first outdoor roster event alerts for the new member and keeps the continuing member quiet")
+end
+
+do
     local p,s,e=fresh()
     s:add("First Person","first")
     s:add("Second Person","second")
