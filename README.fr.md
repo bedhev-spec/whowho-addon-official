@@ -54,9 +54,19 @@ Les captures montrent l’interface en anglais.
 
 WhoWho peut repérer les joueurs que vous ciblez ou survolez avec la souris. Pour qu’il lise aussi les barres de nom que Forever rend accessibles, activez **Utiliser les barres de nom visibles des joueurs** dans **Paramètres → Général → Rencontres dans le monde**.
 
+Pour un ami déjà ajouté, **Vérifier l’état** peut aussi le retrouver dans votre groupe ou raid actuel.
+
 ### WhoWho peut-il trouver des joueurs de la faction adverse ?
 
 Vous pouvez ajouter des joueurs des deux factions. WhoWho peut repérer un joueur adverse à proximité si Forever lui donne accès aux informations du personnage. La recherche **Who** se limite à votre faction. L’absence de résultat pour un joueur de la faction adverse ne permet donc pas de savoir s’il est en ligne.
+
+### Combien de temps durent les alertes et quand peuvent-elles se répéter ?
+
+La bannière reste visible pendant 8 secondes avant de s’estomper. Après une alerte, WhoWho attend au moins 30 secondes avant de vous alerter à nouveau pour le même joueur. Quand vous ajoutez un joueur à votre liste noire personnelle, le délai est de 5 minutes pour ce joueur. Une fois le délai écoulé, WhoWho peut vous alerter s’il repère à nouveau ce joueur lors d’une nouvelle rencontre.
+
+### Les alertes fonctionnent-elles en donjon ou en raid ?
+
+Les alertes de liste noire sont désactivées dans les donjons et les raids instanciés, y compris la bannière et le son. Vous pouvez toujours tester la bannière dans les paramètres.
 
 ### Est-ce que je retrouve mes listes sur mes autres personnages ?
 
