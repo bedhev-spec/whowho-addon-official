@@ -52,9 +52,19 @@ Choose Default, Copper, Slate Blue, or Beige under **Settings → General**. Und
 
 WhoWho can spot players you target or mouse over. Turn on **Use visible player nameplates** under **Settings → General → World sightings** to also use the nameplates that Forever makes readable.
 
+For a saved Friend, **Check status** can also look for them in your current party or raid.
+
 ### Can WhoWho find players from the other faction?
 
 You can add players from either faction. WhoWho can spot an opposing player nearby when Forever makes their character information available. **Who** lookups are limited to your own faction, so a failed lookup for someone from the other faction doesn't tell you whether they're online.
+
+### How long do blacklist alerts last, and when can they repeat?
+
+The banner stays visible for 8 seconds before fading. After an alert, WhoWho waits at least 30 seconds before alerting on the same player again. Adding a player to your Personal Blacklist starts a 5-minute cooldown for that player. Once the cooldown ends, WhoWho can alert you the next time it spots them in a new encounter.
+
+### Do blacklist alerts work in dungeons or raids?
+
+Live blacklist alerts, including the banner and its sound, are disabled inside dungeons and raid instances. **Test banner** is still available in Settings.
 
 ### Do my lists follow me to my other characters?
 
