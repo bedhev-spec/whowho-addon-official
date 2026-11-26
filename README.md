@@ -24,7 +24,7 @@ You can also target a player and click **Add entry** in **Personal Blacklist** t
 
 ## Make it yours
 
-Choose Default, Copper, Slate Blue, or Beige under **Settings → General**. Under **Alerts**, you can adjust banner opacity and sound volume. Click **Test banner**, then drag the preview where you want alerts to appear.
+Choose Default, Cyan Slate, Harbor Blue, Moss Green, or Beige under **Settings → General**. Under **Alerts**, you can adjust banner opacity and sound volume. Click **Test banner**, then drag the preview where you want alerts to appear.
 
 ## Screenshots
 

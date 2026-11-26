@@ -693,7 +693,7 @@ function S.Create()
         end)
     end
     w:SetScript("OnHide", function() P.ClearTooltip(); if S.editor then S.editor.Hide(); S.copyDialog:Hide(); if S.deleteDialog then S.deleteDialog:Hide() end; S.filterMenu:Hide(); S.settings:CancelScale() end end)
-    P.Material(w,"Case",caseMargins)
+    P.TintCaseMaterial(P.Material(w,"Case",caseMargins))
     local rim=CreateFrame("Frame",nil,w); rim:SetAllPoints(w); rim:SetFrameLevel(w:GetFrameLevel()+3)
     P.Material(rim,"Rim",{16,10,8,8})
     if P.db.position then local p=P.db.position; w:ClearAllPoints(); w:SetPoint(p.point, UIParent, p.relativePoint, p.x, p.y) end
@@ -821,7 +821,7 @@ function S.Create()
         local bar=CreateFrame("Slider",nil,details)
         bar:SetOrientation("VERTICAL"); bar:SetWidth(12)
         bar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
-        bar:GetThumbTexture():SetVertexColor(unpack(C.quietEdge))
+        P.SetPaletteTint(bar:GetThumbTexture(),C.controlBorder)
         bar:SetScript("OnValueChanged",function(_,value) d.noteView:SetVerticalScroll(value) end)
         bar:Hide(); d.noteView.scrollbar=bar
     end

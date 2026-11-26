@@ -502,8 +502,7 @@ function P.EditorDialog.Create(parent, options)
             local editable=not record or record.identityState=="unresolved"
             controls.nameLabel:SetText(L(blacklist and "Full character name (required)" or "Character name (required)"))
             if not editable then controls.formName:ClearFocus() end
-            controls.formName:SetEnabled(editable)
-            controls.formName.fieldSkin:SetTexture(P.media..(editable and "LedgerField.tga" or "LedgerDisabled.tga"))
+            P.SetFieldEnabled(controls.formName,editable)
             local hint="Name is fixed for this saved character."
             if moving then hint="Choose reasons to move this friend to Blacklist."
             elseif blacklist and record and not P.manual.validReasons(record.reasonIds) then

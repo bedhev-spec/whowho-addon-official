@@ -24,7 +24,7 @@ Vous pouvez aussi cibler un joueur et cliquer sur **Ajouter** dans la liste noir
 
 ## Personnalisation
 
-Choisissez Par défaut, Cuivre, Bleu ardoise ou Beige dans **Paramètres → Général**. Dans **Alertes**, vous pouvez régler l’opacité de la bannière et le volume du son. Cliquez sur **Tester la bannière**, puis faites glisser l’aperçu à l’endroit où vous souhaitez afficher les alertes.
+Choisissez Par défaut, Ardoise cyan, Bleu portuaire, Vert mousse ou Beige dans **Paramètres → Général**. Dans **Alertes**, vous pouvez régler l’opacité de la bannière et le volume du son. Cliquez sur **Tester la bannière**, puis faites glisser l’aperçu à l’endroit où vous souhaitez afficher les alertes.
 
 ## Captures d’écran
 
