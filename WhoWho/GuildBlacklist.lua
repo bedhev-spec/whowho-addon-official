@@ -10,6 +10,7 @@ local MAX_PACKET, MAX_NAME, MAX_ROWS, MAX_SCOPES = 240, 160, 512, 32
 local REVISION_TICKS, MAX_SERVER_TIME, CLOCK_SKEW = 128.0, 4294967295, 5
 local MAX_REVISION = (MAX_SERVER_TIME+1)*REVISION_TICKS-1
 local SEND_INTERVAL, SYNC_INTERVAL, REPLY_INTERVAL, MEMBERSHIP_SETTLE = 1.25, 30, 90, 0.75
+local SCOPE_RETRY = 2
 local SAMPLE_WINDOW, SAMPLE_LIFETIME, MAX_ACKS, MAX_RESPONDERS = 12, 60, 8, 1024
 -- ChatConstantsDocumentation.lua for the pinned Forever build.
 local SUCCESS, DUPLICATE_PREFIX, ADDON_THROTTLE, CHANNEL_THROTTLE, LOCKDOWN = 0, 1, 3, 8, 11
@@ -261,8 +262,24 @@ local function verify()
     return state, status, true
 end
 
-local function currentState(allowReadOnly)
+local currentState
+
+-- The club ID can become readable without any event, so a missing scope is read again.
+local awaitingScope=false
+local function awaitScope()
+    local after=member(C_Timer,"After")
+    if awaitingScope or type(after) ~= "function" then return end
+    awaitingScope=pcall(after,SCOPE_RETRY,function()
+        awaitingScope=false
+        if not inWorld or checking or settling then return end
+        local _, _, changed=currentState()
+        if changed or state then notify() end
+    end)
+end
+
+function currentState(allowReadOnly)
     local current, currentStatus, changed=verify()
+    if inWorld and not state and not settling and status == "unavailable" then awaitScope() end
     if current and changed then schedule(current) end
     if current and (current ~= state or settling) then return nil, status, changed end
     if current then currentStatus=status end

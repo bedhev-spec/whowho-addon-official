@@ -355,7 +355,16 @@ do
     s:add("Late Member","late")
     s:event("GROUP_ROSTER_UPDATE")
     for _=1,6 do s:tick(.25) end
-    check(not s.observer:GetScript("OnUpdate"),"roster settling stops after its bounded retry window")
+    local reads=s.reads()
+    s:set("party1","Late Member","late")
+    s:tick(1)
+    check(shown(e.WhowhoBlacklistLiveBanner) and s.reads()>reads,
+        "an empty slot inside the group count stays under the retry")
+    e.GetNumSubgroupMembers=function() return 0 end
+    s:set("party1",nil)
+    s:event("GROUP_ROSTER_UPDATE")
+    for _=1,40 do s:tick(.25) end
+    check(not s.observer:GetScript("OnUpdate"),"polling stops once the group has no unresolved slot")
 end
 
 for _,loading in ipairs({false,true}) do
@@ -774,13 +783,6 @@ for _,case in ipairs({"hidden-parent","hidden-during-show","expired"}) do
     check(calls==0 and not shown(e.WhowhoBlacklistLiveBanner),"restoring the UI does not uncover a stale paint: "..case)
     s:tick(.25)
     local live=e.WhowhoBlacklistLiveBanner
-    if case=="expired" then
-        check(calls==0 and not shown(live),"an expired UI-blocked alert does not replay on restore")
-        s:set("target",nil,nil,true)
-        s:tick(5)
-        s:set("target","First Person","first",true)
-        live=e.WhowhoBlacklistLiveBanner
-    end
     check(calls==1 and live:IsVisible(),"a current sighting plays once when it visibly appears: "..case)
     s:tick(.25)
     check(calls==1,"subsequent visible updates do not repeat the cue: "..case)
@@ -1390,12 +1392,15 @@ do
     s:event("ZONE_CHANGED_NEW_AREA")
     s.region(3)
     s:event("ZONE_CHANGED_NEW_AREA")
-    check(not shown(live),"leaving an instance does not replay current or pending sightings")
+    check(shown(live) and live.character:GetText()=="Second Person",
+        "leaving an instance shows a never-shown alert and does not replay a shown one")
+    s:tick(9)
     s:set("target",nil,nil,true)
     s:set("mouseover",nil,nil,true)
     s:tick(5)
     s:set("target","First Person","first",true)
     check(not shown(live),"leaving an instance preserves a cooldown started outside")
+    s:tick(20)
     s:set("mouseover","Second Person","second",true)
     check(shown(live) and live.character:GetText()=="Second Person","a new sighting outside can alert normally")
 end

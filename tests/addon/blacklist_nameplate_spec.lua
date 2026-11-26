@@ -453,10 +453,560 @@ do
     check(s.reads()==before and not s:live(),"dungeon suppression prevents plate identity reads")
     s.instance(nil)
     s:event("ZONE_CHANGED_NEW_AREA")
-    check(s.sounds()==0 and #s:groups()==1,"leaving a dungeon quietly seeds an already present plate")
+    check(s.sounds()==1 and #s:groups()==1,"leaving a dungeon alerts for a plate never alerted before")
     s:event("PLAYER_LEAVING_WORLD")
     s:plate("nameplate2",hostile,hostileGuid,"Horde")
-    check(s.sounds()==0 and not s:live(),"events during world departure cannot warn")
+    check(s.sounds()==1 and not s:live(),"events during world departure cannot warn")
+end
+
+local function polling(s) return s.observer:GetScript("OnUpdate")~=nil end
+
+local function grouped(s)
+    s.e.IsInRaid=function() return false end
+    s.e.GetNumSubgroupMembers=function() return 1 end
+end
+
+for _,case in ipairs({
+    {source="party",late="name"},
+    {source="party",late="secrecy"},
+    {source="target",late="secrecy"},
+    {source="nameplate",late="name"},
+    {source="nameplate",late="secrecy"},
+}) do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local label=case.source.." late "..case.late
+    local unit={name=case.late=="name" and "Bram" or hostile,guid=hostileGuid,faction="Horde",
+        restricted=case.late=="secrecy"}
+    local token=case.source=="party" and "party1" or case.source=="nameplate" and "nameplate1" or "target"
+    if case.source=="nameplate" then
+        s:plate(token,unit.name,hostileGuid,"Horde",{restricted=unit.restricted})
+        unit=s.units[token]
+    else
+        s.units[token]=unit
+        if case.source=="party" then grouped(s) end
+        s:event(case.source=="party" and "GROUP_ROSTER_UPDATE" or "PLAYER_TARGET_CHANGED")
+    end
+    for _=1,5 do s:tick(1) end
+    check(not s:live() and polling(s),label..": the unreadable unit stays under observation")
+    unit.name,unit.restricted=hostile,false
+    s:tick(1)
+    check(s:live() and s.sounds()==1,label..": alerts without another event")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    check(polling(s),"an unreadable plate is retried")
+    s:removePlate("nameplate1")
+    s:tick(1)
+    check(not polling(s) and not s:live(),"removing the unreadable plate stops the retry")
+    s:plate("nameplate1","A Boar","Creature-1","Horde",{player=false})
+    check(not polling(s),"a non-player plate is never retried")
+    s:unit("target",ally,allyGuid,"Alliance")
+    check(not polling(s),"a readable unlisted unit needs no retry")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    s.instance("party")
+    s:event("ZONE_CHANGED_NEW_AREA")
+    s:tick(1)
+    check(not polling(s),"a dungeon stops the retry")
+end
+
+-- Group joins are tracked by GUID, independently of the Blacklist.
+local function party()
+    local s=fresh()
+    local size=0
+    s.e.IsInRaid=function() return false end
+    s.e.GetNumSubgroupMembers=function() return size end
+    function s:members(...)
+        size=select("#",...)
+        for i=1,4 do self.units["party"..i]=nil end
+        for i=1,size do
+            local name=select(i,...)
+            self.units["party"..i]={name=name,guid=name==hostile and hostileGuid or allyGuid,faction="Horde"}
+        end
+        self:event("GROUP_ROSTER_UPDATE")
+    end
+    function s:wait(seconds) for _=1,seconds do self:tick(1) end end
+    return s
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members()
+    s:unit("target",hostile,hostileGuid,"Horde")
+    s:unit("target")
+    s:wait(10)
+    s:members(hostile)
+    s:wait(1)
+    check(s.sounds()==2,"joining during the cooldown alerts again")
+    s:wait(10)
+    s:members()
+    s:wait(6)
+    s:members(hostile)
+    s:wait(2)
+    check(s.sounds()==2,"only one join bypasses the cooldown per 30 seconds")
+    s:members()
+    s:wait(40)
+    s:members(hostile)
+    check(s.sounds()==3,"a later rejoin alerts")
+    s:wait(10)
+    s.units.party1.name="Bram"
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(40)
+    s.units.party1.name=hostile
+    s:wait(2)
+    check(s.sounds()==3,"an unreadable member has not left")
+end
+
+do
+    local s=party()
+    s:members(hostile)
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    check(s.sounds()==0,"blacklisting a current member is not a join")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:members(hostile)
+    check(s.sounds()==1,"a join inside the new-entry cooldown alerts")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members(hostile)
+    s:wait(40)
+    s.instance("party")
+    s:event("PLAYER_LEAVING_WORLD")
+    s:event("PLAYER_ENTERING_WORLD")
+    s:wait(40)
+    s.instance(nil)
+    s.units.party1.name="Bram"
+    s:event("PLAYER_LEAVING_WORLD")
+    s:event("PLAYER_ENTERING_WORLD")
+    s:wait(2)
+    s.units.party1.name=hostile
+    s:wait(2)
+    check(s.sounds()==1,"a late-readable member is not alerted again after an instance")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:unit("target",hostile,hostileGuid,"Horde")
+    s:event("PLAYER_LEAVING_WORLD")
+    s.units.target=nil
+    s:event("PLAYER_ENTERING_WORLD")
+    for _=1,40 do s:tick(1) end
+    s:unit("target",hostile,hostileGuid,"Horde")
+    check(s.sounds()==2,"an ordinary loading screen does not mute a later sighting")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members()
+    s:members(hostile)
+    s:wait(10)
+    s:members()
+    s:wait(6)
+    s:members(hostile)
+    check(s.sounds()==2,"a join without a cooldown keeps the bypass for the rejoin")
+end
+
+do
+    local s=party()
+    s:members(ally)
+    local before=s.reads()
+    s:unit("target")
+    check(s.reads()==before,"a target change does not re-read the group")
+end
+
+do
+    local s=fresh()
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    s:add(hostile,hostileGuid)
+    check(polling(s),"the first list entry starts retrying an unreadable plate")
+    s.units.nameplate1.name=hostile
+    s:tick(1)
+    check(s.sounds()==1,"the retried plate alerts")
+end
+
+do
+    local s=fresh()
+    s.B.sightingsNameplatesChanged(false)
+    s:add(hostile,hostileGuid)
+    s:plate("nameplate1","Bram",hostileGuid,"Horde",{noEvent=true})
+    s:tick(1)
+    s.B.sightingsNameplatesChanged(true)
+    check(polling(s),"enabling nameplates starts retrying an unreadable plate")
+    s.units.nameplate1.name=hostile
+    s:tick(1)
+    check(s.sounds()==1,"a plate retried after enabling alerts")
+end
+
+-- A member without a readable name must not hide other members' leaves.
+for _,hiding in ipairs({"name","secrecy"}) do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:members(ally,hostile)
+    s:wait(40)
+    if hiding=="name" then s.units.party1.name="Ari" else s.units.party1.restricted=true end
+    s:event("GROUP_ROSTER_UPDATE")
+    s.units.party2=nil
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(40)
+    s.units.party2={name=hostile,guid=hostileGuid,faction="Horde"}
+    s.e.GetNumSubgroupMembers=function() return 2 end
+    s:event("GROUP_ROSTER_UPDATE")
+    check(s.sounds()==2,"a rejoin alerts while another member hides its "..hiding)
+end
+
+do
+    local s=party()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1={name="Ari",guid=allyGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s.units.party2={name=hostile,guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 2 end
+    s:event("GROUP_ROSTER_UPDATE")
+    check(s.sounds()==1,"a join is seen although the first roster had an unreadable name")
+end
+
+do
+    local s=party()
+    s:members()
+    s.units.party1={name="Bram",guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1.name=hostile
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    check(s.sounds()==0,"a member who joined before any list entry is not a join when blacklisted")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.e.UIParent:Hide()
+    s:members(hostile)
+    s:event("PLAYER_LEAVING_WORLD")
+    s.e.UIParent:Show()
+    s:event("PLAYER_ENTERING_WORLD")
+    s:wait(2)
+    check(s.sounds()==1,"an unshown join alert survives a loading screen")
+end
+
+do
+    local s=party()
+    s:add(ally,allyGuid)
+    s:members()
+    s:members(hostile)
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    check(s.sounds()==0,"an unlisted member's join is dismissed before they are listed")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1={name=hostile,guid=hostileGuid,player=false}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s.units.party1.player=true
+    s:wait(2)
+    check(s.sounds()==1,"a join is kept until the member reads as a player")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.e.UIParent:Hide()
+    s:members(hostile)
+    s:members()
+    s:wait(6)
+    s.e.UIParent:Show()
+    s:members(hostile)
+    s:wait(2)
+    check(s.sounds()==1,"an unshown join does not spend the bypass")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members()
+    s.units.party1={name=hostile,guid=hostileGuid,faction="Horde"}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("PLAYER_TARGET_CHANGED")
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(10)
+    check(s.sounds()==1,"a roster read before its event does not alert twice")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local later=0
+    local now=s.e.GetTime
+    s.e.GetTime=function() return now()+later end
+    s.e.UIParent:Hide()
+    s:unit("target",hostile,hostileGuid,"Horde")
+    later=13
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    s.e.UIParent:Show()
+    s:tick(.25)
+    s:tick(.25)
+    check(s.sounds()==1,"an alert expired by a hidden event is queued again")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local shows=0
+    s.B.showLive=function() shows=shows+1; return function() return false end end
+    s:unit("target",hostile,hostileGuid,"Horde")
+    for _=1,100 do s:tick(.01) end
+    check(shows<=6,"a banner that never becomes visible is not retried every frame")
+end
+
+local function guilded()
+    local s=fresh({guildRows={["ari creek"]={rev=0,reasonIds={"griefing"}}}})
+    local timers={}
+    s.e.C_Timer.After=function(_,fn) timers[#timers+1]=fn end
+    function s:settle() local due=timers; timers={}; for _,fn in ipairs(due) do fn() end end
+    return s
+end
+
+do
+    local s=guilded()
+    s:unit("target",ally,allyGuid,"Alliance")
+    s:unit("target")
+    s:event("PLAYER_GUILD_UPDATE","player")
+    check(s:live(),"an unsettled guild membership keeps the visible Guild banner")
+    s:settle()
+    s:tick(1)
+    check(s:live() and s.sounds()==1,"the same Guild keeps its banner without a replay")
+    s.guild(false)
+    s:settle()
+    check(not s:live(),"leaving the guild removes its banner")
+end
+
+do
+    local s=guilded()
+    local club=s.e.C_Club.GetGuildClubId
+    s.e.C_Club.GetGuildClubId=function() return nil end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    s:settle()
+    s.e.IsInRaid=function() return false end
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s.units.party1={name=ally,guid=allyGuid}
+    s:event("GROUP_ROSTER_UPDATE")
+    s:settle()
+    check(not s:live(),"an unreadable guild cannot alert")
+    s.e.C_Club.GetGuildClubId=club
+    s:settle()
+    check(s:live() and s.sounds()==1,"a late guild ID alerts a listed member without another event")
+end
+
+-- A member already grouped when listed has not joined.
+do
+    local s=party()
+    s:members()
+    s.instance("party")
+    s:event("ZONE_CHANGED_NEW_AREA")
+    s:members(hostile)
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.instance(nil)
+    s:event("ZONE_CHANGED_NEW_AREA")
+    s:wait(2)
+    check(s.sounds()==0,"a member who joined inside an instance before being listed is not a join")
+end
+
+do
+    local s=party()
+    s:add(ally,allyGuid)
+    s:members()
+    s.units.party1={name="Bram",guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    local record=s:add(hostile,hostileGuid)
+    record.guid=nil
+    assert(s.B.deferNewBlacklist(record,s.A.store))
+    s.units.party1.name=hostile
+    s:wait(2)
+    check(s.sounds()==0,"an unreadable member listed before the name resolves is not a join")
+end
+
+do
+    local s=party()
+    s:members(hostile)
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:members()
+    s:wait(2)
+    s:members(hostile)
+    check(s.sounds()==0,"a leave shorter than the grace is not a rejoin")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1={name="Bram",guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s.units.party1=nil
+    s.e.GetNumSubgroupMembers=function() return 0 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    s.units.party1={name=hostile,guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    check(s.sounds()==0,"leaving drops a pending join")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1={name=hostile}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(3)
+    s.units.party1.guid=hostileGuid
+    s:wait(2)
+    check(s.sounds()==1,"a GUID read by a retry is still a join")
+end
+
+do
+    local s=party()
+    s:members(hostile)
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s.units.party1.restricted=true
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(6)
+    s.units.party1.restricted=false
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    check(s.sounds()==0,"a hidden member has not left")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    s:members(hostile)
+    s:wait(31)
+    s:event("PLAYER_LEAVING_WORLD")
+    s:event("PLAYER_ENTERING_WORLD")
+    s:wait(2)
+    check(s.sounds()==1,"a shown join is not restored by a loading screen")
+end
+
+do
+    local s=party()
+    s:members()
+    assert(s.B.deferNewBlacklist(s:add(hostile,hostileGuid),s.A.store))
+    assert(s.B.deferNewBlacklist(s:add(ally,allyGuid),s.A.store))
+    s:members(hostile,ally)
+    s:wait(1)
+    s:wait(1)
+    check(s.sounds()==1 and s.e.WhowhoBlacklistLiveBanner.more:IsShown(),"joins inside a cooldown share one banner")
+    s:members()
+    s:wait(6)
+    s:members(ally)
+    s:wait(12)
+    check(s.sounds()==1,"a grouped join banner spends the bypass")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local flags={hidden=true}
+    s:plate("nameplate1",hostile,hostileGuid,"Horde",flags)
+    flags.hidden=false
+    s:tick(1)
+    check(s.sounds()==1,"a plate whose frame appears late alerts")
+end
+
+do
+    local s=guilded()
+    local club=s.e.C_Club.GetGuildClubId
+    s.e.C_Club.GetGuildClubId=function() return nil end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    s:settle()
+    s.e.IsInRaid=function() return false end
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s.units.party1={name=ally,guid=allyGuid}
+    s:event("GROUP_ROSTER_UPDATE")
+    s:settle()
+    s.e.C_Club.GetGuildClubId=club
+    s.e.WhowhoPreview.GuildBlacklist.context()
+    s:settle()
+    check(s:live() and s.sounds()==1,"a UI read before the retry does not swallow the alert")
+end
+
+-- A personal entry keeps the scan running while guild membership is unsettled.
+for _,personal in ipairs({false,true}) do
+    local s=guilded()
+    if personal then s:add(hostile,hostileGuid) end
+    local size=0
+    s.e.IsInRaid=function() return false end
+    s.e.GetNumSubgroupMembers=function() return size end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:unit("target",ally,allyGuid,"Alliance")
+    s:unit("target")
+    for _=1,10 do s:tick(1) end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    size=1
+    s.units.party1={name=ally,guid=allyGuid}
+    s:event("GROUP_ROSTER_UPDATE")
+    s:settle()
+    for _=1,2 do s:tick(1) end
+    check(s.sounds()==2,"a Guild-listed join survives unsettled membership")
+end
+
+do
+    -- Forever runs Lua 5.1 (60 upvalues per function); the Fengari runner would accept more.
+    local s=fresh()
+    local seen,worst={},0
+    local function walk(fn)
+        if seen[fn] then return end
+        seen[fn]=true
+        local n=0
+        for i=1,255 do
+            local name,value=debug.getupvalue(fn,i)
+            if not name then break end
+            if name~="_ENV" then
+                n=n+1
+                if type(value)=="function" and debug.getinfo(value,"S").what=="Lua" then walk(value) end
+            end
+        end
+        worst=math.max(worst,n)
+    end
+    walk(s.observer.scripts.OnEvent)
+    walk(s.B.sightingsBookChanged)
+    print("largest sighting upvalue count "..worst)
+    check(worst<=52,"sighting functions keep headroom under the Lua 5.1 upvalue limit")
 end
 
 print(("RESULT simulated Blacklist nameplate %d checks passed"):format(count))
