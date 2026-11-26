@@ -8,11 +8,11 @@ local reader=A.unitReader
 local bannerCooldown=30
 local newEntryCooldown=300
 local rosterSettleTime=1
-local retryInterval=1
+local retryWaits={3,6,12,24,48,84}
 local joinBypassInterval=30
 local plateLimit=256
 -- One table: installSightings functions are close to the Lua 5.1 limit of 60 upvalues.
-local limits={absenceGrace=5,pollInterval=.25,groupWindow=3,pendingLifetime=12,pendingLimit=8}
+local limits={absenceGrace=5,pollInterval=.25,groupWindow=3,pendingLifetime=12,pendingLimit=8,blockedLimit=48}
 
 local function allowsLiveBanner()
     if type(IsInInstance)~="function" then return false end
@@ -51,8 +51,10 @@ local function readSighting(token, source, store, region, sampled, metadata, own
     local retry=metadata.retried=="incomplete" and sampled and sampled.retry
     if retry then sampled.retry=nil end
     local name,guid,state=A.playerAddIdentity(token,store,region,owns)
-    -- A listed group slot that is not yet a player is unknown, not empty.
-    if (source=="Party" or source=="Raid") and (state=="absent" or state=="non-player") then return nil end
+    -- A counted group slot that is not yet a player shows nobody now, but is read again.
+    if (source=="Party" or source=="Raid") and (state=="absent" or state=="non-player") then
+        return false,nil,false,false,true
+    end
     if state=="absent" or state=="non-player" or state=="self" then return false,nil,false end
     if not name then return nil end
     if plate and (plate.name~=name or plate.guid~=guid) then return false,nil,false,true end
@@ -158,7 +160,7 @@ local function newParty()
     -- A definitively unlisted member must not count as joining when listed later.
     function party.dismiss(units)
         for _,unit in ipairs(units) do
-            if unit.roster and unit.sighting==false then
+            if unit.roster and unit.sighting==false and not unit.vacant then
                 local guid=party.slots[unit.token]
                 if guid then party.joins[guid]=nil end
             end
@@ -191,7 +193,7 @@ function B.installSightings()
     local plates, plateCount, platesEnabled, plateRevision={},0,false,0
     local sampled,requested,metadataRetry={},{},false
     -- Unreadable players are polled; no event is assumed to announce them. One table limits upvalues.
-    local retry={plates={},unresolved=false,watching=false,at=nil}
+    local retry={plates={},units={},pass=0,watching=false,at=nil}
     -- Memoized sightings compare book identity without retaining an obsolete snapshot.
     local sampledOwner=setmetatable({}, {__mode="v"})
     local queue, cooldowns={},{}
@@ -319,10 +321,35 @@ function B.installSightings()
             if previous[token] then return true end
         end
     end
+    -- Each unreadable unit has its own six waits; a read before its wait has passed does not use one.
+    function retry.mark(token,guid)
+        local unit=retry.units[token]
+        if not unit or guid and unit.guid and unit.guid~=guid then
+            unit={tries=1,at=clock+retryWaits[1]}
+            retry.units[token]=unit
+        elseif unit.at and clock>=unit.at then
+            unit.tries=unit.tries+1
+            local wait=retryWaits[unit.tries]
+            unit.at=wait and clock+wait
+        end
+        unit.guid,unit.pass=guid or unit.guid,retry.pass
+    end
+    -- A unit that was read, or left, gets fresh waits the next time it cannot be read.
+    function retry.sweep()
+        for token,unit in pairs(retry.units) do
+            if not unit.plate and unit.pass~=retry.pass then retry.units[token]=nil end
+        end
+    end
     local function refreshUpdates()
-        local retrying=world and (retry.unresolved or retry.watching and next(retry.plates))
-        if not retrying then retry.at=nil
-        elseif not retry.at then retry.at=clock+retryInterval end
+        local nextRetry
+        if world then
+            for token,unit in pairs(retry.units) do
+                if unit.at and (not unit.plate or retry.watching and retry.plates[token])
+                    and (not nextRetry or unit.at<nextRetry) then nextRetry=unit.at end
+            end
+        end
+        retry.at=nextRetry
+        local retrying=nextRetry~=nil
         local needed=not not (world and (pending or rosterRetryUntil or visible or previous.mouseover
             or #queue>0 or trackingPlate() or retrying))
         if world and not needed then
@@ -371,6 +398,7 @@ function B.installSightings()
     end
     local function clearPlates()
         for token in pairs(plates) do forgetPlate(token) end
+        for token in pairs(retry.plates) do retry.units[token]=nil end
         retry.plates={}
         plateRevision=plateRevision+1
     end
@@ -384,16 +412,24 @@ function B.installSightings()
         end
         local frame=reader.playerPlate(token,expectedFrame)
         if not owns() then return end
-        if not frame then retry.plates[token]=true; return end
+        local function unreadable()
+            retry.plates[token]=true
+            -- Plate events arrive outside a scan, when the clock may be stale.
+            advance()
+            retry.mark(token)
+            retry.units[token].plate=true
+        end
+        if not frame then unreadable(); return end
         local name,guid,state=A.playerAddIdentity(token,store,region,owns)
         if not name then
-            if state~="absent" and state~="non-player" and state~="self" and owns() then retry.plates[token]=true end
+            if state~="absent" and state~="non-player" and state~="self" and owns() then unreadable() end
             return
         end
         if not reader.playerGuid(guid) or not reader.playerPlate(token,frame) or not owns() then return end
         local plate={frame=frame,name=name,guid=guid,region=region}
         plate.record=plateRecord(store,region,plate,guildLookup)
         plates[token],plateCount=plate,plateCount+1
+        retry.units[token]=nil
         return plate.record~=nil
     end
     local function seedPlates()
@@ -466,7 +502,7 @@ function B.installSightings()
         local currentSample=sampledOwner.store==store and sampled.region==region and sampled
         local function inspect(token, enabled, plate, rosterSource)
             if not ownsScan() then return end
-            local sighting,evidence,memo=false,nil,false
+            local sighting,evidence,memo,vacant=false,nil,false,nil
             local function ownsUnit()
                 return ownsScan() and (not plate or plates[token]==plate)
             end
@@ -476,15 +512,17 @@ function B.installSightings()
                 local available=not plate or ownsPlate(token,plate)
                 if available and ownsUnit() then
                     local recycled
-                    sighting,evidence,memo,recycled=readSighting(token,rosterSource or reader.worldSource(token),store,region,
+                    sighting,evidence,memo,recycled,vacant=readSighting(token,rosterSource or reader.worldSource(token),store,region,
                         currentSample and currentSample[token],metadata,ownsUnit,plate)
                     if recycled and ownsUnit() then forgetPlate(token) end
                 elseif available==nil then
                     sighting,memo=nil,nil
                 end
             end
-            if enabled and sighting==nil then retry.unresolved=true end
-            units[#units+1]={token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate,roster=rosterSource}
+            if enabled and (sighting==nil or vacant) then
+                retry.mark(token,rosterSource and party.slots[token])
+            end
+            units[#units+1]={vacant=vacant,token=token,sighting=sighting,evidence=evidence,memo=memo,plate=plate,roster=rosterSource}
         end
         if target then inspect("target",true) end
         if mouseover then inspect("mouseover",true) end
@@ -707,7 +745,8 @@ function B.installSightings()
                         if entry and entry.episode==episode and not entry.encounter then entry.encounter=encounter end
                     end
                 end
-                if sighting.reasons~="" and not episode.handled and not episode.queued then
+                if sighting.reasons~="" and not episode.handled and not episode.queued
+                    and (episode.blocks or 0)<limits.blockedLimit then
                     local duplicate
                     for _,entry in ipairs(queue) do
                         if entry.sighting.id==sighting.id then duplicate=entry; break end
@@ -745,7 +784,7 @@ function B.installSightings()
                 local sighting=entry.sighting
                 local age=clock-entry.at
                 if (not staged or staged[entry]) and entry.region==region and age>=limits.pollInterval and age<=limits.pendingLifetime
-                    and sighting.id~=display.id and episodes[sighting.id]==entry.episode
+                    and sighting.id~=display.id and not display.batched[sighting.id] and episodes[sighting.id]==entry.episode
                     and (entry.episode.join or not onCooldown(region,sighting.name)) and currentlySupported(sighting) then
                     local saved=savedSighting(store,region,sighting.name,sighting.guid,guildLookup)
                     if same(saved,sighting) and saved.reasons==sighting.reasons and ownsCurrentSighting(saved) then
@@ -781,6 +820,8 @@ function B.installSightings()
                     display.stagedGroup=nil
                     for i=#batch,1,-1 do
                         local item=batch[i]
+                        -- A counted player who joins later gets a banner of their own.
+                        display.batched[item.entry.sighting.id]=true
                         startCooldown(region,item.entry.sighting.name,bannerCooldown)
                         local joined=supported[item.entry.sighting.id]
                         party.shown(item.entry.episode,clock,joined and joined.roster)
@@ -845,16 +886,19 @@ function B.installSightings()
                     return
                 end
                 if not appeared then
-                    retry.blocked=true
+                    entry.episode.blocks=(entry.episode.blocks or 0)+1
+                    retry.blocked=entry.episode.blocks<limits.blockedLimit
+                    if not retry.blocked then discard(1) end
                     hide()
                     return
                 end
                 startCooldown(region,saved.name,bannerCooldown)
                 local candidate=supported[entry.sighting.id]
                 party.shown(entry.episode,clock,candidate and candidate.roster)
+                entry.episode.blocks=nil
                 discard(1,true)
                 saved.encounter,saved.region,saved.ledgerRevision=encounter,region,ledgerRevision
-                saved.appearance,saved.openedAt=ownsAppearance,clock
+                saved.appearance,saved.openedAt,saved.batched=ownsAppearance,clock,{}
                 if currentlySupported(saved) then saved.episode=entry.episode end
                 visible,shownAt=saved,clock
                 A.alertSound.playBanner(function()
@@ -881,7 +925,7 @@ function B.installSightings()
         end
         local retried=metadataRetry
         scanning,pending,metadataRetry=true,false,false
-        retry.unresolved,retry.blocked=false,false
+        retry.pass,retry.blocked=retry.pass+1,false
         local owner,store,region=revision,A.store,A.region
         local guildLookup,ownsGuild,guildUnavailable
         if world then guildLookup,ownsGuild,guildUnavailable=G.bannerLookup(region) end
@@ -893,6 +937,8 @@ function B.installSightings()
             guildLookup=guildLookup,ownsGuild=ownsGuild,guildUnavailable=guildUnavailable,previous=previous}
         requested={}
         scan(owner,resume,metadata,groupToPaint,paintElapsed)
+        -- A scan that returned before reading units leaves nothing to retry; an interrupted one sets pending and keeps its waits.
+        if not pending then retry.sweep() end
         local function owns()
             return world and owner==revision and A.store==store and A.region==region
         end
@@ -944,10 +990,9 @@ function B.installSightings()
         local rosterDue=rosterRetryUntil and (clock>=nextPoll or clock>=rosterRetryUntil)
         if rosterRetryUntil and clock>=rosterRetryUntil then rosterRetryUntil=nil end
         local retryDue=retry.at and clock>=retry.at
-        if retryDue then
-            retry.at=nil
-            retryPlates()
-        end
+        if retryDue then retry.at=nil end
+        -- A plate read early does not spend a wait, and can still join the open banner.
+        if retryDue or visible and clock-visible.openedAt<=limits.groupWindow and clock>=nextPoll then retryPlates() end
         if rosterDue or retryDue then party.due=true end
         if pending or expired or groupToPaint or rosterDue or retryDue
             or ((retry.blocked or visible or previous.mouseover or trackingPlate()) and clock>=nextPoll) then
@@ -1022,8 +1067,10 @@ function B.installSightings()
         local old=plates[token]
         plateRevision=plateRevision+1
         forgetPlate(token)
+        retry.units[token]=nil
         local matched=event=="NAME_PLATE_UNIT_ADDED" and rememberPlate(token,nil,G.bannerLookup(A.region))
-        if matched or prior or old and old.record or retry.plates[token] then sample() end
+        if matched or prior or old and old.record or retry.plates[token] and not retry.watching then sample()
+        elseif retry.plates[token] then refreshUpdates() end
     end
     observer:SetScript("OnEvent",function(_,event)
         if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_LOGOUT" then
@@ -1037,6 +1084,7 @@ function B.installSightings()
             world,pending,revision=false,false,revision+1
             local oldEpisodes=episodes
             party.restore(oldEpisodes)
+            retry.units={}
             episodes,previous,queue=handled,seen,{}
             clearPlates()
             sampled,requested,metadataRetry={},{},false
@@ -1051,8 +1099,12 @@ function B.installSightings()
             seedPlates()
             sample(nil,roster)
         elseif world then
-            if event=="PLAYER_TARGET_CHANGED" then requested.target=true end
-            if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover=true end
+            for _,episode in pairs(episodes) do
+                if episode.blocks then episode.blocks=math.min(episode.blocks,limits.blockedLimit-1) end
+            end
+            -- Another unit took the token, so its waits start again.
+            if event=="PLAYER_TARGET_CHANGED" then requested.target,retry.units.target=true,nil end
+            if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover,retry.units.mouseover=true,nil end
             if event=="ZONE_CHANGED_NEW_AREA" then seedPlates() end
             sample(nil,event=="GROUP_ROSTER_UPDATE")
         end

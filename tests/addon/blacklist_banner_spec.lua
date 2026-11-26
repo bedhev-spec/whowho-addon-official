@@ -357,7 +357,7 @@ do
     for _=1,6 do s:tick(.25) end
     local reads=s.reads()
     s:set("party1","Late Member","late")
-    s:tick(1)
+    s:tick(3)
     check(shown(e.WhowhoBlacklistLiveBanner) and s.reads()>reads,
         "an empty slot inside the group count stays under the retry")
     e.GetNumSubgroupMembers=function() return 0 end

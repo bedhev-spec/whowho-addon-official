@@ -490,7 +490,7 @@ for _,case in ipairs({
     for _=1,5 do s:tick(1) end
     check(not s:live() and polling(s),label..": the unreadable unit stays under observation")
     unit.name,unit.restricted=hostile,false
-    s:tick(1)
+    s:tick(10)
     check(s:live() and s.sounds()==1,label..": alerts without another event")
 end
 
@@ -640,7 +640,7 @@ do
     s:add(hostile,hostileGuid)
     check(polling(s),"the first list entry starts retrying an unreadable plate")
     s.units.nameplate1.name=hostile
-    s:tick(1)
+    s:tick(3)
     check(s.sounds()==1,"the retried plate alerts")
 end
 
@@ -653,7 +653,7 @@ do
     s.B.sightingsNameplatesChanged(true)
     check(polling(s),"enabling nameplates starts retrying an unreadable plate")
     s.units.nameplate1.name=hostile
-    s:tick(1)
+    s:tick(3)
     check(s.sounds()==1,"a plate retried after enabling alerts")
 end
 
@@ -893,7 +893,7 @@ do
     s:event("GROUP_ROSTER_UPDATE")
     s:wait(3)
     s.units.party1.guid=hostileGuid
-    s:wait(2)
+    s:wait(7)
     check(s.sounds()==1,"a GUID read by a retry is still a join")
 end
 
@@ -944,7 +944,7 @@ do
     local flags={hidden=true}
     s:plate("nameplate1",hostile,hostileGuid,"Horde",flags)
     flags.hidden=false
-    s:tick(1)
+    s:tick(3)
     check(s.sounds()==1,"a plate whose frame appears late alerts")
 end
 
@@ -983,6 +983,259 @@ for _,personal in ipairs({false,true}) do
     s:settle()
     for _=1,2 do s:tick(1) end
     check(s.sounds()==2,"a Guild-listed join survives unsettled membership")
+end
+
+-- An unreadable unit is retried after 3, 6, 12, 24, 48 and 84 seconds, then left to events.
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s.units.party1={name="Bram",guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(1)
+    local times,reads={},s.reads()
+    for second=2,400 do
+        s:tick(1)
+        if s.reads()>reads then times[#times+1]=second; reads=s.reads() end
+    end
+    check(table.concat(times,",")=="3,9,21,45,93,177","the retry follows its six waits")
+    check(not polling(s),"the retry stops after the sixth wait")
+    s.units.party1.name=hostile
+    s:event("PLAYER_TARGET_CHANGED")
+    check(s.sounds()==1,"a later event still reads a unit that used up its retries")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s.units.party1={name="Ari",guid=allyGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(200)
+    s.units.party2={name="Bram",guid=hostileGuid}
+    s.e.GetNumSubgroupMembers=function() return 2 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    s.units.party2.name=hostile
+    s:wait(1)
+    check(s.sounds()==1,"a new unreadable member has its own retries")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    for _=1,200 do s:tick(1) end
+    check(not polling(s),"an unreadable plate stops being retried")
+    s:removePlate("nameplate1")
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    s.units.nameplate1.name=hostile
+    s:tick(3)
+    check(s.sounds()==1,"a plate added again has its retries back")
+end
+
+do
+    local s=guilded()
+    local waits={}
+    local capture=s.e.C_Timer.After
+    s.e.C_Timer.After=function(delay,fn) if delay>=3 then waits[#waits+1]=delay end; capture(delay,fn) end
+    s.e.C_Club.GetGuildClubId=function() return nil end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    for _=1,20 do s:settle() end
+    check(table.concat(waits,",")=="3,6,12,24,48,84","the guild ID retry follows the same waits and stops")
+    s:event("PLAYER_GUILD_UPDATE","player")
+    for _=1,3 do s:settle() end
+    check(#waits>6,"a guild event restarts the guild ID retry")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local shows=0
+    s.B.showLive=function() shows=shows+1; return function() return false end end
+    s:unit("target",hostile,hostileGuid,"Horde")
+    for _=1,1000 do s:tick(.25) end
+    check(shows<=60,"a banner that never becomes visible stops being retried")
+end
+
+for _,leave in ipairs({"emptying the list","an instance"}) do
+    local s=fresh()
+    local record=s:add(hostile,hostileGuid)
+    s:unit("target","Bram",hostileGuid,"Horde")
+    s:tick(1)
+    if leave=="an instance" then
+        s.instance("party")
+        s:event("ZONE_CHANGED_NEW_AREA")
+    else
+        assert(s.A.store.delete(record.id,3,record.fullName,record.guid))
+        s.A.refresh()
+    end
+    for _=1,40 do s:tick(.1) end
+    check(not polling(s),leave.." before a retry is due stops the retry")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:add(ally,allyGuid)
+    s:plate("nameplate1",hostile,hostileGuid,"Horde")
+    s:plate("nameplate2","Ari",allyGuid,"Alliance")
+    s:tick(.25)
+    s.units.nameplate2.name=ally
+    for _=1,4 do s:tick(.25) end
+    local live=s.e.WhowhoBlacklistLiveBanner
+    check(live.more:IsShown() and live.more:GetText()=="+1 more","a plate read inside the group window joins the banner")
+    for _=1,60 do s:tick(.25) end
+    check(s.sounds()==1,"a plate read inside the group window does not alert again")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:add(ally,allyGuid)
+    s:members()
+    s:unit("target",hostile,hostileGuid,"Horde")
+    s:unit("mouseover",ally,allyGuid,"Horde")
+    s:tick(.25)
+    s:tick(.25)
+    s:members(ally)
+    for _=1,4 do s:tick(.25) end
+    local live=s.e.WhowhoBlacklistLiveBanner
+    check(live.more:GetText()=="+1 more","a counted player who joins is not counted twice")
+    for _=1,120 do s:tick(.25) end
+    check(s.sounds()==2,"the join of a counted player gets its own banner")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:unit("target",ally,allyGuid,"Alliance")
+    s:tick(100)
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    local times,reads={},s.reads()
+    for second=1,10 do
+        s:tick(1)
+        if s.reads()>reads then times[#times+1]=second; reads=s.reads() end
+    end
+    check(table.concat(times,",")=="3,9","the first plate wait after an idle period is 3 seconds")
+end
+
+do
+    local s=guilded()
+    local timers={}
+    s.e.C_Timer.After=function(delay,fn) timers[#timers+1]={delay=delay,fn=fn} end
+    local function run(short)
+        local due=timers
+        timers={}
+        for _,timer in ipairs(due) do
+            if short and timer.delay>=3 then timers[#timers+1]=timer else timer.fn() end
+        end
+    end
+    local function waits()
+        local delays={}
+        for _,timer in ipairs(timers) do delays[#delays+1]=timer.delay end
+        return table.concat(delays,",")
+    end
+    s.e.C_Club.GetGuildClubId=function() return nil end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    for _=1,6 do run() end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    run(true)
+    check(waits()=="84,3","a guild event restarts the guild ID waits while a long wait is pending")
+    run()
+    check(waits()=="6","the retired long wait does not read the guild ID again")
+end
+
+do
+    local s=fresh()
+    s:plate("nameplate1",hostile,hostileGuid,"Horde")
+    s.units.nameplate1.restricted=true
+    s:add(hostile,hostileGuid)
+    s.units.nameplate1.restricted=false
+    s:tick(3)
+    check(s.sounds()==1,"a stored plate that cannot be read during a scan is retried")
+end
+
+for _,source in ipairs({"target","mouseover","nameplate"}) do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    local show=s.B.showLive
+    local shows=0
+    s.B.showLive=function() shows=shows+1; return function() return false end end
+    if source=="nameplate" then s:plate("nameplate1",hostile,hostileGuid,"Horde")
+    else s:unit(source,hostile,hostileGuid,"Horde") end
+    for _=1,400 do s:tick(.25) end
+    local settled=shows
+    for _=1,800 do s:tick(.25) end
+    check(settled<=48 and shows==settled,source..": an invisible banner stops being retried")
+    s:event("PLAYER_TARGET_CHANGED")
+    for _=1,100 do s:tick(.25) end
+    check(shows==settled+1,source..": a game event gives one more attempt")
+    s.B.showLive=show
+    s:event("PLAYER_TARGET_CHANGED")
+    s:tick(.25)
+    check(s.sounds()==1,source..": the alert shows once the banner can appear")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s.units.party1={name="Ari",guid=allyGuid}
+    s.e.GetNumSubgroupMembers=function() return 1 end
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(200)
+    s.units.party1={name="Bram",guid=hostileGuid}
+    s:event("GROUP_ROSTER_UPDATE")
+    s:wait(2)
+    s.units.party1.name=hostile
+    s:wait(1)
+    check(s.sounds()==1,"another member in the same slot has its own retries")
+end
+
+do
+    local s=fresh()
+    s:add(hostile,hostileGuid)
+    s:unit("target","Ari",allyGuid,"Horde")
+    for _=1,200 do s:tick(1) end
+    s:unit("target","Bram",hostileGuid,"Horde")
+    s:tick(2)
+    s.units.target.name=hostile
+    s:tick(1)
+    check(s.sounds()==1,"a new target has its own retries")
+end
+
+do
+    local s=guilded()
+    s.e.C_Club.GetGuildClubId=function() return nil end
+    s:event("PLAYER_GUILD_UPDATE","player")
+    for _=1,20 do s:settle() end
+    local added=0
+    local capture=s.e.C_Timer.After
+    s.e.C_Timer.After=function(delay,fn) if delay>=3 then added=added+1 end; capture(delay,fn) end
+    s:event("PLAYER_ENTERING_WORLD")
+    check(added==1,"entering the world restarts the used-up guild ID waits")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members(hostile)
+    s.units.party1=nil
+    s:event("GROUP_ROSTER_UPDATE")
+    s:tick(.25)
+    check(s:live(),"a briefly empty group slot keeps the visible banner")
+end
+
+do
+    local s=party()
+    s:add(hostile,hostileGuid)
+    s:members(ally,ally,ally,ally)
+    local reads=s.reads()
+    s:plate("nameplate1","Bram",hostileGuid,"Horde")
+    check(s.reads()-reads<=6,"an unreadable plate does not read the whole group again")
+    s.units.nameplate1.name=hostile
+    s:tick(3)
+    check(s.sounds()==1,"that plate is still retried")
 end
 
 do
