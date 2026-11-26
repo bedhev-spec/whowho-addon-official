@@ -292,22 +292,47 @@ end
 local colors=p.colors
 local window=S.window
 local swatches=S.interfaceColorChoices
-local choices={{"default","Par défaut"},{"copperTheme","Cuivre"},{"slateBlue","Bleu ardoise"},{"beige","Beige"}}
-local function checkSwatches()
+local choices={
+    {"default","Par défaut","Default",{"111619","171D20","20282B","242C30","18292D","23363A","79BCC1","E7AB75","281B14","68777C","465055"}},
+    {"cyanSlate","Ardoise cyan","Cyan Slate",{"131A1D","131A1D","202A2E","202A2E","1A3035","1A3035","86CCD1","F0AE78","201710","64777D","64777D"}},
+    {"slateBlue","Bleu portuaire","Harbor Blue",{"131B25","131B25","1D2938","1D2938","233349","233349","91C2E8","B0CEF0","141E2C","687D97","687D97"},"1D2938"},
+    {"forestGreen","Vert mousse","Moss Green",{"171D18","171D18","242D25","242D25","27362C","27362C","ABD2B1","C0D8AE","182218","718275","718275"},"242D25"},
+    {"beige","Beige","Beige",{"171613","201E1A","28241F","28241F","27231D","27231D","D8C198","DCC7A4","241D14","8F816A","8F816A"},"28241F"},
+}
+local roles={"background","panel","header","raised","selected","friendSelected","selectedRule","copper","ink","controlBorder","controlTrack"}
+local function rgb(hex)
+    return {tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255,1}
+end
+local function checkMaterialTint(material,reference,desired)
+    for index,value in ipairs(rgb(reference)) do
+        assert(math.abs(material.vertexColor[index]*value-math.min(value,desired[index]))<1e-9)
+    end
+end
+local function checkSwatches(shell)
     local previousX,previousY
-    for _,choice in ipairs(choices) do
-        local button=assert(swatches[choice[1]])
+    for index,choice in ipairs(choices) do
+        local button=assert(shell.interfaceColorChoices[choice[1]])
         local _,x,y=button:GetPoint()
         local circle=button.mark:GetParent()
         assert(button:IsVisible() and not button.label and button:GetWidth()==36 and button:GetHeight()==36)
         assert(circle:GetWidth()==24 and circle:GetHeight()==24 and circle:GetPoint()=="CENTER")
         assert(not previousX or (x-previousX==44 and y==previousY))
-        assert(x+button:GetWidth()<S.settings:GetWidth())
+        assert(x+button:GetWidth()+24<=shell.settings:GetWidth())
+        assert(p.interfaceColors[index].id==choice[1])
+        if choice[1]=="cyanSlate" then
+            local fill
+            for _,texture in ipairs(circle.children) do
+                if texture.texture==p.media.."LedgerRoundFill.tga" then fill=texture; break end
+            end
+            sameColor(assert(fill).vertexColor,rgb("86CCD1"))
+            sameColor(button.mark.vertexColor,rgb("201710"))
+        end
         previousX,previousY=x,y
     end
 end
 assert(#p.interfaceColors==#choices)
-checkSwatches()
+assert(S.layoutMode=="compact")
+checkSwatches(S)
 for _,choice in ipairs(choices) do
     local button=swatches[choice[1]]
     s:fire(button,"OnEnter")
@@ -316,7 +341,7 @@ for _,choice in ipairs(choices) do
     assert(not e.GameTooltip:IsShown())
 end
 e.UIParent:SetSize(1280,800); p.SetScale(1)
-checkSwatches()
+checkSwatches(S)
 assert(e.WhowhoPreviewDB.interfaceColor=="default" and swatches.default:GetChecked() and swatches.default.mark:IsShown())
 swatches.default:SetChecked(false) -- A native CheckButton toggles itself before OnClick.
 swatches.default:Click()
@@ -339,47 +364,119 @@ for _,widget in ipairs(s.nodes) do
     if widget.texture==p.media.."LedgerBanner.tga" then banners[#banners+1]=widget end
 end
 assert(#banners==2) -- Existing sample and movable test banner share styling.
-local originalHeader,originalPrimary=S.rosterHeader.color,S.addButton.roundFill[2].vertexColor
-local originalWarning,originalOnline,originalPriest={table.unpack(colors.warning)},{table.unpack(colors.online)},{table.unpack(colors.priest)}
-local previousRail
-for _,id in ipairs({"copperTheme","slateBlue","beige"}) do
+local canvas,rim,mascot,listPanel
+for _,node in ipairs(s.nodes) do
+    if node:GetParent()==window and node.texture==p.media.."LedgerCase.tga" then canvas=node end
+    if node.texture==p.media.."LedgerRim.tga" then rim=node end
+    if node.texture==p.media.."MascotBadge.tga" then mascot=node end
+    if node.allPoints==S.list and node.color then listPanel=node end
+end
+assert(canvas and rim and mascot and listPanel)
+local scaleTrack
+for _,node in ipairs(S.scaleSlider.children) do
+    if node.kind=="Texture" and node.color then scaleTrack=node end
+end
+assert(scaleTrack)
+local originalWarning,originalOnline,originalDelete={table.unpack(colors.warning)},{table.unpack(colors.online)},{table.unpack(colors.deleteGlyph)}
+local nativeClass=e.C_ClassColor.GetClassColor
+local shaman={r=0,g=.44,b=.87}
+e.C_ClassColor.GetClassColor=function(class) return class=="SHAMAN" and shaman or nativeClass(class) end
+S.nav.friend:Click()
+local selectedRow=S.rows[1]
+selectedRow.record.class="SHAMAN"
+selectedRow.record.evidenceName=selectedRow.record.fullName
+selectedRow:Click()
+assert(selectedRow.selected)
+S.nav.settings:Click()
+for _,choice in ipairs(choices) do
+    local id=choice[1]
+    local original=id=="default"
     local button=swatches[id]
     button:Click()
     assert(e.WhowhoPreviewDB.interfaceColor==id and S.window==window and button:IsVisible())
     for key,swatch in pairs(swatches) do
         assert(swatch:GetChecked()==(key==id) and swatch.mark:IsShown()==(key==id))
     end
+    for index,role in ipairs(roles) do sameColor(colors[role],rgb(choice[4][index])) end
+    if original then sameColor(canvas.vertexColor,{1,1,1,1})
+    else checkMaterialTint(canvas,"1C2225",colors.background) end
+    sameColor(listPanel.color,colors.panel)
     sameColor(S.rosterHeader.color,colors.header)
+    sameColor(S.blacklistDetailsBackground.color,colors.raised)
     sameColor(S.addButton.roundFill[2].vertexColor,colors.copper)
+    sameColor(S.addButton.label.textColor,colors.ink)
+    sameColor(S.refreshButton.roundEdge[2].vertexColor,colors.controlBorder)
+    sameColor(scaleTrack.color,colors.controlTrack)
+    if original then sameColor(S.searchBox.fieldSkin.vertexColor,{1,1,1,1})
+    else checkMaterialTint(S.searchBox.fieldSkin,"718086",colors.controlBorder) end
     sameColor(S.scaleSlider:GetThumbTexture().vertexColor,colors.teal)
-    local rail=railColors(S,p)
-    assert(rail[4]==1 and (not previousRail or rail[1]~=previousRail[1] or rail[2]~=previousRail[2] or rail[3]~=previousRail[3]))
-    previousRail=rail
+    assert(not rim.vertexColor and not mascot.vertexColor)
+    sameColor(railColors(S,p),choice[5] and rgb(choice[5]) or {0,0,0,0})
     for _,material in ipairs(banners) do
-        assert(material.desaturated)
-        sameColor(material.vertexColor,colors.teal)
+        local tinted=id~="default" and id~="cyanSlate"
+        assert(material.desaturated==tinted)
+        sameColor(material.vertexColor,tinted and colors.teal or {1,1,1,1})
     end
     sameColor(colors.warning,originalWarning)
     sameColor(colors.online,originalOnline)
-    sameColor(colors.priest,originalPriest)
+    sameColor(colors.deleteGlyph,originalDelete)
+    S.nav.friend:Click()
+    assert(selectedRow:IsVisible() and selectedRow.selected and selectedRow.leadingEdge:IsShown())
+    sameColor(selectedRow.background.color,colors.friendSelected)
+    sameColor(selectedRow.leadingEdge.color,colors.selectedRule)
+    sameColor(selectedRow.name.textColor,{shaman.r,shaman.g,shaman.b,1})
+    if id=="cyanSlate" then
+        s:fire(selectedRow,"OnEnter")
+        sameColor(selectedRow.background.color,rgb("223136"))
+        s:fire(selectedRow,"OnLeave")
+        sameColor(selectedRow.background.color,rgb("1A3035"))
+    end
+    S.nav.settings:Click()
+    local restored,rs,re,restoredShell=fresh(function() return "enUS" end,e.WhowhoPreviewDB,{484,800})
+    restored.Toggle()
+    restoredShell.nav.settings:Click()
+    restoredShell.settingsTabs.general:Click()
+    assert(restoredShell.layoutMode=="compact" and restored.db.interfaceColor==id)
+    checkSwatches(restoredShell)
+    sameColor(restoredShell.rosterHeader.color,colors.header)
+    sameColor(railColors(restoredShell,restored),railColors(S,p))
+    for _,other in ipairs(choices) do
+        local restoredSwatch=restoredShell.interfaceColorChoices[other[1]]
+        assert(restoredSwatch:GetChecked()==(other[1]==id) and restoredSwatch.mark:IsShown()==(other[1]==id))
+        rs:fire(restoredSwatch,"OnEnter")
+        assert(re.GameTooltip:GetText()==other[3] and re.GameTooltip:GetOwner()==restoredSwatch)
+        rs:fire(restoredSwatch,"OnLeave")
+    end
 end
-assert(originalHeader[1]~=S.rosterHeader.color[1] and originalPrimary[1]~=S.addButton.roundFill[2].vertexColor[1])
-local restored,_,_,restoredShell=fresh(function() return "enUS" end,e.WhowhoPreviewDB)
-restored.Toggle()
-assert(restored.db.interfaceColor=="beige" and restoredShell.interfaceColorChoices.beige:GetChecked())
-sameColor(restoredShell.rosterHeader.color,colors.header)
-sameColor(railColors(restoredShell,restored),railColors(S,p))
-for old,expected in pairs({copper="default",forestGreen="beige",unknown="default"}) do
+for old,expected in pairs({copper="cyanSlate",copperTheme="cyanSlate",unknown="default",[false]="default"}) do
     local migrated=fresh(function() return "enUS" end,{interfaceColor=old})
     assert(migrated.db.interfaceColor==expected)
 end
 swatches.default:Click()
 sameColor(railColors(S,p),{0,0,0,0})
-sameColor(S.rosterHeader.color,originalHeader)
-sameColor(S.addButton.roundFill[2].vertexColor,originalPrimary)
+sameColor(S.rosterHeader.color,rgb("20282B"))
+sameColor(S.addButton.roundFill[2].vertexColor,rgb("E7AB75"))
 for _,material in ipairs(banners) do
     assert(not material.desaturated)
     sameColor(material.vertexColor,{1,1,1,1})
 end
+S.nav.friend:Click()
+S.Select(selectedRow.record)
+local formName=S.editor.controls.formName
+S.editButton:Click()
+assert(formName:IsVisible() and not formName:IsEnabled() and formName.fieldSkin.texture==p.media.."LedgerDisabled.tga")
+sameColor(formName.fieldSkin.vertexColor,{1,1,1,1})
+S.editor.controls.formCancel:Click()
+S.addButton:Click()
+assert(formName:IsVisible() and formName:HasFocus() and formName.fieldSkin.texture==p.media.."LedgerFocus.tga")
+assert(not formName.fieldSkin.desaturated)
+sameColor(formName.fieldSkin.vertexColor,{1,1,1,1})
+p.SetInterfaceColor("cyanSlate")
+assert(not formName.fieldSkin.desaturated)
+checkMaterialTint(formName.fieldSkin,"9CDCE0",colors.teal)
+formName:ClearFocus()
+assert(formName.fieldSkin.texture==p.media.."LedgerField.tga")
+checkMaterialTint(formName.fieldSkin,"718086",colors.controlBorder)
+S.editor.controls.formCancel:Click()
 assert(s.forbiddenCalls==0)
 print("RESULT manual locale and interface color localization, live rendering and preference restore passed")

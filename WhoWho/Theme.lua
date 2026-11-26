@@ -14,35 +14,43 @@ P.colors = {
     line=rgb("465055"), rowRule=rgb("343F44"), selectedRule=rgb("79BCC1"),
     bronze=rgb("9E7860"), copper=rgb("E7AB75"), copperHover=rgb("EFBB8C"), copperPressed=rgb("C99367"),
     danger=rgb("8C3D36"), dangerHover=rgb("A84C43"), dangerPressed=rgb("6F302B"),
-    noteInset=rgb("1C2428"), quietEdge=rgb("68777C"), gold=rgb("F2EEE5"), ink=rgb("281B14"), warning=rgb("F4CB7B"),
+    noteInset=rgb("1C2428"), controlBorder=rgb("68777C"), controlTrack=rgb("465055"), gold=rgb("F2EEE5"), ink=rgb("281B14"), warning=rgb("F4CB7B"),
     text=rgb("F2EEE5"), priest=rgb("FFF1CE"), body=rgb("D5DBD9"), muted=rgb("B0BCBC"), disabled=rgb("889396"),
     selection=rgb("345863"), teal=rgb("9CDCE0"), online=rgb("B7D58D"), listedOffline=rgb("B0BCBC"), deleteGlyph=rgb("C98279"),
     tooltipFriendRim=rgb("8EE69B"), tooltipBlacklistRim=rgb("FF958A"),
     clear={0,0,0,0}, actionHover={1,1,1,.075}, actionPressed={.61,.86,.88,.24}
 }
 local C = P.colors
-local defaultPalette = "default"
+local defaultPalette="default"
+local cyanSlate="cyanSlate"
 P.interfaceColors = {
     {id=defaultPalette,label="Default",swatch=rgb("7C9A9E")},
-    {id="copperTheme",label="Copper",colors={
-        panel="25201D",header="332720",raised="382D27",noteInset="2C2420",railTint="79452D",
-        selected="3B2A22",friendSelected="483228",selectedHover="4F382B",selectedPressed="34251F",
-        selectedRule="E4A474",selection="694733",teal="EAB592",
-        copper="DE9A68",copperHover="F0B58A",copperPressed="C98555"
+    {id=cyanSlate,label="Cyan Slate",swatch=rgb("86CCD1"),colors={
+        background="131A1D",panel="131A1D",header="202A2E",raised="202A2E",noteInset="1B2428",
+        selected="1A3035",friendSelected="1A3035",hover="223136",selectedHover="223136",
+        selectedRule="86CCD1",teal="86CCD1",controlBorder="64777D",controlTrack="64777D",
+        copper="F0AE78",copperHover="F5BC90",copperPressed="D99868",ink="201710"
     }},
-    {id="slateBlue",label="Slate Blue",colors={
-        panel="171C26",header="212B3B",raised="242E40",noteInset="1C2533",railTint="445C80",
-        selected="222E47",friendSelected="283A57",selectedHover="2D4164",selectedPressed="1B2941",
-        selectedRule="90B0E4",selection="3E5881",teal="A9C7F4",
-        copper="9BB8ED",copperHover="B5CCF5",copperPressed="839FD5"
+    {id="slateBlue",label="Harbor Blue",colors={
+        background="131B25",panel="131B25",header="1D2938",raised="1D2938",noteInset="192332",railTint="1D2938",
+        selected="233349",friendSelected="233349",hover="26374B",pressed="141E2C",selectedHover="2A3C53",selectedPressed="192738",
+        selectedRule="91C2E8",selection="3A5578",teal="91C2E8",controlBorder="687D97",controlTrack="687D97",
+        copper="B0CEF0",copperHover="C3DBF5",copperPressed="94B4D9",ink="141E2C"
+    }},
+    {id="forestGreen",label="Moss Green",colors={
+        background="171D18",panel="171D18",header="242D25",raised="242D25",noteInset="1F2820",railTint="242D25",
+        selected="27362C",friendSelected="27362C",hover="2B382E",pressed="182218",selectedHover="2E3F33",selectedPressed="1F2D23",
+        selectedRule="ABD2B1",selection="3D5A47",teal="ABD2B1",controlBorder="718275",controlTrack="718275",
+        copper="C0D8AE",copperHover="D0E4C0",copperPressed="A9C499",ink="182218"
     }},
     {id="beige",label="Beige",colors={
-        panel="25231E",header="302C24",raised="363129",noteInset="2B2821",railTint="796C59",
-        selected="383126",friendSelected="453D30",selectedHover="4A4133",selectedPressed="312C23",
-        selectedRule="D4C1A1",selection="655640",teal="E0CFB2",
-        copper="D7C3A1",copperHover="E8D5B6",copperPressed="BDA786"
+        background="171613",panel="201E1A",header="28241F",raised="28241F",noteInset="211E19",railTint="28241F",
+        selected="27231D",friendSelected="27231D",hover="29261F",pressed="151410",selectedHover="312B22",selectedPressed="211E17",
+        selectedRule="D8C198",selection="554934",teal="D8C198",controlBorder="8F816A",controlTrack="8F816A",
+        copper="DCC7A4",copperHover="E8D4B3",copperPressed="C7B08A",ink="241D14"
     }}
 }
+local retiredPresets={copper=cyanSlate,copperTheme=cyanSlate}
 local defaults,presets,themeColors={},{},{}
 for _,preset in ipairs(P.interfaceColors) do
     local colors={}
@@ -53,6 +61,7 @@ for _,preset in ipairs(P.interfaceColors) do
     end
     presets[preset.id]=colors
     preset.swatch=preset.swatch or colors.copper
+    preset.swatchInk=colors.ink or {unpack(C.background)}
 end
 presets[defaultPalette]=defaults
 
@@ -63,10 +72,9 @@ function P.BindPalette(widget,apply)
     if apply then apply(widget,activePalette) end
 end
 function P.ApplyInterfaceColor(id)
-    -- The previous Copper was the original appearance. Forest Green became Beige.
-    if id=="copper" then id=defaultPalette end
-    if id=="forestGreen" then id="beige" end
-    if type(id)~="string" or not presets[id] then id=defaultPalette end
+    if type(id)~="string" then id=defaultPalette end
+    id=retiredPresets[id] or id
+    if not presets[id] then id=defaultPalette end
     if id~=activePalette then
         activePalette=id
         -- Preserve references already held by selection and pointer feedback.
@@ -172,9 +180,20 @@ function P.Material(frame, name, slice, layer)
 end
 function P.TintMaterial(texture,alternateTint)
     P.BindPalette(texture,function(self,id)
-        local alternate=id~=defaultPalette
+        local alternate=id~=defaultPalette and id~=cyanSlate
         self:SetDesaturated(alternate)
         self:SetVertexColor(unpack(alternate and alternateTint or white))
+    end)
+end
+-- Match a reference pixel by channel while retaining the material's texture and alpha.
+local function tintToReference(texture,color,reference)
+    texture:SetVertexColor(math.min(1,color[1]/reference[1]),math.min(1,color[2]/reference[2]),math.min(1,color[3]/reference[3]),1)
+end
+local caseReference=rgb("1C2225")
+function P.TintCaseMaterial(texture)
+    P.BindPalette(texture,function(self,id)
+        if id==defaultPalette then self:SetVertexColor(unpack(white))
+        else tintToReference(self,C.background,caseReference) end
     end)
 end
 function P.PopupMaterial(frame, name)
@@ -269,7 +288,7 @@ local function updateButton(b)
             if b.rounded=="primary" then
                 if b.destructive then fill=pressed and C.dangerPressed or hovered and C.dangerHover or C.danger
                 else fill=pressed and C.copperPressed or hovered and C.copperHover or C.copper end
-            else fill=pressed and C.body or hovered and C.teal or C.quietEdge end
+            else fill=pressed and C.body or hovered and C.teal or C.controlBorder end
         end
         local surface=fill
         if b.roundEdge then
@@ -439,25 +458,36 @@ function P.CopyNameButton(parent,caption,onClick)
     P.ButtonIcon(button,"copy",22)
     return button
 end
+local fieldReference,focusReference=rgb("718086"),rgb("9CDCE0")
+local function setFieldSkin(box,focused)
+    local skin=box.fieldSkin
+    local enabled=box:IsEnabled()
+    skin:SetTexture(P.media..(not enabled and "LedgerDisabled.tga" or focused and "LedgerFocus.tga" or "LedgerField.tga"))
+    if enabled then
+        local color,reference=C.controlBorder,fieldReference
+        if focused then color,reference=C.teal,focusReference end
+        P.BindPalette(skin,function(self,id)
+            if id==defaultPalette then self:SetVertexColor(unpack(white))
+            else tintToReference(self,color,reference) end
+        end)
+    else
+        repaint[skin]=nil
+        skin:SetVertexColor(unpack(white))
+    end
+end
+function P.SetFieldEnabled(box,enabled)
+    box:SetEnabled(enabled)
+    setFieldSkin(box,box:HasFocus())
+end
 function P.Field(parent,width,height,multiline)
     local box=CreateFrame("EditBox",nil,parent)
     box:SetFontObject("GameFontHighlight"); P.Type(box,"body")
     box:SetSize(width,height); box:SetAutoFocus(false)
     box:SetTextColor(unpack(C.text)); box:SetTextInsets(12,12,4,4)
-    local skin=P.Material(multiline and parent or box,"Field",{4,4,4,4})
-    box.fieldSkin=skin
-    local function fieldSkin(self,focused)
-        self.fieldSkin:SetTexture(P.media..(focused and "LedgerFocus.tga" or "LedgerField.tga"))
-        if focused then
-            P.TintMaterial(self.fieldSkin,C.teal)
-        else
-            repaint[self.fieldSkin]=nil
-            self.fieldSkin:SetDesaturated(false)
-            self.fieldSkin:SetVertexColor(unpack(white))
-        end
-    end
-    box:SetScript("OnEditFocusGained",function(self) fieldSkin(self,true) end)
-    box:SetScript("OnEditFocusLost",function(self) fieldSkin(self,false) end)
+    box.fieldSkin=P.Material(multiline and parent or box,"Field",{4,4,4,4})
+    setFieldSkin(box,false)
+    box:SetScript("OnEditFocusGained",function(self) setFieldSkin(self,true) end)
+    box:SetScript("OnEditFocusLost",function(self) setFieldSkin(self,false) end)
     if multiline then box:SetMultiLine(true) end
     return box
 end

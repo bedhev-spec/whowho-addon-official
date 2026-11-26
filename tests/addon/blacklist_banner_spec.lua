@@ -1519,7 +1519,7 @@ do
     local test=e.WhowhoBlacklistTestBanner
     check(adjusted(test,1) and test:IsShown() and test.SetAlphaArgs[1]==1,
         "the movable test opens with the current setting and starts its own hold")
-    p.SetInterfaceColor("beige")
+    p.SetInterfaceColor("forestGreen")
     for _,frame in ipairs({sample,live,test}) do
         check(adjusted(frame,1) and frame.interior.desaturated and frame.rim.desaturated
             and frame.interior.vertexColor[2]==p.colors.teal[2] and frame.rim.vertexColor[2]==p.colors.teal[2],
@@ -1541,7 +1541,7 @@ do
     local restored=reloaded.Shell
     restored.SetSection("settings")
     local restoredSample=assert(visibleField(restored.settings,function(t) return t=="Veyra Ashfall" end)):GetParent()
-    check(reloaded.db.bannerOpacity==85 and reloaded.db.interfaceColor=="beige"
+    check(reloaded.db.bannerOpacity==85 and reloaded.db.interfaceColor=="forestGreen"
         and restored.bannerOpacitySlider:GetValue()==85 and restored.bannerOpacityLabel:GetText()=="85%"
         and adjusted(restoredSample,.85) and restoredSample.rim.desaturated,
         "reload applies both saved preferences to the control and sample")
