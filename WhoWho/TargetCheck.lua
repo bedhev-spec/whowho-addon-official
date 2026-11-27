@@ -574,7 +574,8 @@ function check.clearNameplates()
 end
 function check.observeNameplate(unit, expectedFrame, owns)
     local store, region = A.store, A.region
-    if not store or not inContext(region) or not owns() or A.counts and A.counts.friend == 0 then return false end
+    if not store or not inContext(region) or not owns()
+        or A.counts and A.recordsStore==store and A.counts.friend == 0 then return false end
     local frame = reader.playerPlate(unit, expectedFrame)
     if not frame then return false end
     local function playerPlate()

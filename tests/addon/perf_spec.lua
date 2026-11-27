@@ -242,4 +242,21 @@ do
     check(saved.reasonIds[1]=="other" and saved.note==nil,"items cannot mutate saved records")
 end
 
+-- A plate delivered while the first Friend's view is still rebuilding is read.
+do
+    local _,s,e,A=fresh()
+    e.UnitClass=function() return "Mage","MAGE" end
+    e.UnitLevel=function() return 42 end
+    local apply=A.targetCheck.apply
+    A.targetCheck.apply=function(...)
+        A.targetCheck.apply=apply
+        s:plate("nameplate1","Ari North","Player-1-00000001")
+        return apply(...)
+    end
+    assert(A.save(nil,"friend","Ari North","",nil,{}))
+    A.targetCheck.apply=apply
+    A.refresh()
+    check(A.records[1].class=="MAGE","a plate during the first Friend's save is read")
+end
+
 print("RESULT perf "..count.." passed 0 failed")
