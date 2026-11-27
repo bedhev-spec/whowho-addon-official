@@ -197,6 +197,12 @@ function P.Toggle()
 end
 SLASH_WHOWHOPREVIEW1="/wwpreview"
 SlashCmdList.WHOWHOPREVIEW=function() P.Toggle() end
+local function finishRelog(run,source)
+    run.pending[source]=nil
+    for event,provider in pairs(relogEvents) do
+        if provider==source then unregister(event) end
+    end
+end
 local function scanRelog(run)
     if run.scanning then run.wake=true; return end
     run.scanning=true
@@ -212,12 +218,7 @@ local function scanRelog(run)
                     return relogCycle==run and run.revision[source]==revision
                 end)
                 if ok and applied then changed=true end
-                if relogCycle==run and (not ok or done) then
-                    run.pending[source]=nil
-                    for event,provider in pairs(relogEvents) do
-                        if provider==source then unregister(event) end
-                    end
-                end
+                if relogCycle==run and (not ok or done) then finishRelog(run,source) end
             end
         end
         if not run.wake or relogCycle~=run then break end
@@ -246,6 +247,11 @@ local function onRelogEvent(event,initialLogin,reloadingUI)
         if relogCycle~=run then return end
         run.started=true
     elseif run.started then
+        -- A guildless character never becomes ready. IsInGuild is trusted only once clubs have loaded.
+        if event=="INITIAL_CLUBS_LOADED" and P.manual.nativeRead.read(IsInGuild)==false then
+            if relogCycle~=run then return end
+            finishRelog(run,"Guild")
+        end
         local source=relogEvents[event]
         for _,provider in ipairs(relogSources) do
             if run.pending[provider] and (not source or source==provider) then

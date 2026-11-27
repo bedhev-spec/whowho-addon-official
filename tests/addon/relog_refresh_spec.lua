@@ -83,6 +83,27 @@ assert(w.guildCalls==1 and w.recentCalls==1 and v.WhowhoAddressBookDB==before an
 -- Normal zone transitions never start the login job.
 local z,zs,ze,zt=setup(prefs); zt.guildReady=true; zt.recentReady=true
 zs:event("PLAYER_ENTERING_WORLD",false,false); zs:event("INITIAL_CLUBS_LOADED"); zs:event("RECENT_ALLIES_DATA_READY"); assertNoRead(zt)
+-- No guild once clubs have loaded ends the Guild wait; earlier or unreadable answers do not.
+for _,case in ipairs({{inGuild=false,calls=0},{inGuild=true,calls=1},{secret=true,calls=1}}) do
+    local g,gs,ge,gt=setup(prefs); local club
+    ge.C_Club.GetGuildClubId=function() return club end
+    ge.IsInGuild=function() if case.secret then return gs.secret end return case.inGuild end
+    gs:event("PLAYER_ENTERING_WORLD",true,false); gs:event("CLUB_MEMBERS_UPDATED",5); gs:event("PLAYER_REGEN_ENABLED")
+    gs:event("INITIAL_CLUBS_LOADED")
+    club=5; gt.guildReady=true; gt.rows={guildRow("Guild North","g",1)}
+    gs:event("CLUB_MEMBERS_UPDATED",5)
+    assert(gt.guildCalls==case.calls)
+    gt.recentReady=true; gt.allies={ally("Recent North","r",true)}; gs:event("RECENT_ALLIES_DATA_READY")
+    assert(gt.recentCalls==1 and row(g,recent).presenceReport.online==true)
+end
+-- IsInGuild false before clubs load is not trusted.
+local o,os_,oe,ot=setup(prefs); local oclub
+oe.C_Club.GetGuildClubId=function() return oclub end
+oe.IsInGuild=function() return false end
+os_:event("PLAYER_ENTERING_WORLD",true,false); os_:event("PLAYER_REGEN_ENABLED"); os_:event("RECENT_ALLIES_CACHE_UPDATE")
+oclub=5; ot.guildReady=true; ot.rows={guildRow("Guild North","g",1)}
+os_:event("CLUB_MEMBERS_UPDATED",5)
+assert(ot.guildCalls==1)
 -- Duplicate or conflicting identity rows cannot publish; unreadable and absent data stay Unknown.
 local x,xs,xe,xt=setup(prefs); xt.guildReady=true; xt.recentReady=true
 xt.rows={guildRow("Guild North","g",1),guildRow("Guild North","g",4),guildRow("Both North","wrong",1)}
