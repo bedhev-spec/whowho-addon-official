@@ -35,16 +35,15 @@ local function refresh(at, metadataOnly)
     refreshRevision = refreshRevision + 1
     local revision = refreshRevision
     local store=A.store
-    local records = store.activeRecords(A.region)
-    if not records then return end
     local rebuilt = {}
+    local counts = {friend=0, blacklist=0}
     local rosterContext = {}
     local expiry, playerFaction, factionRead
     if not at and ((A.targetCheck and A.targetCheck.hasSightings()) or (A.whoLookup and A.whoLookup.hasReports())) then at=now() end
     if revision ~= refreshRevision then return end
-    for _, record in pairs(records) do
+    local complete = store.eachActive(A.region, function(record)
         local item = { id=record.id, region=record.region, guid=record.guid, fullName=record.fullName, membership=record.membership,
-            note=record.note, role=record.role, reasonIds=record.reasonIds, createdAt=record.createdAt, updatedAt=record.updatedAt,
+            note=record.note, role=record.role, reasonIds=book.copy(record.reasonIds), createdAt=record.createdAt, updatedAt=record.updatedAt,
             favorite=record.membership=="friend" and record.favorite==true, identityState=record.identityState,
             whisperMuted=record.whisperMuted }
         if record.lastKnown then
@@ -76,11 +75,14 @@ local function refresh(at, metadataOnly)
             if due and (not expiry or due < expiry) then expiry = due end
         end
         -- A roster API can dispatch an event and rebuild the view before returning.
-        if revision ~= refreshRevision then return end
+        if revision ~= refreshRevision then return false end
         rebuilt[#rebuilt + 1] = item
-    end
+        counts[item.membership] = counts[item.membership] + 1
+    end)
+    if not complete then return end
     for i = #A.records, 1, -1 do A.records[i] = nil end
     for i, item in ipairs(rebuilt) do A.records[i] = item end
+    A.counts=counts
     A.recordsStore=store
     nextSightingExpiry=expiry
     if not metadataOnly and P.BlacklistBanner.sightingsBookChanged then P.BlacklistBanner.sightingsBookChanged() end

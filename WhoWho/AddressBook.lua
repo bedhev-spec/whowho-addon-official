@@ -54,6 +54,7 @@ local function clone(value)
     if not success then return nil, false end
     return result, valid
 end
+function AddressBook.copy(value) return (clone(value)) end
 local function text(value) return type(value) == "string" and value ~= "" end
 local function region(value)
     return text(value) or (type(value) == "number" and value > 0 and value < math.huge and value % 1 == 0)
@@ -235,6 +236,18 @@ function AddressBook.open(input)
         local records = snapshot.records or {}
         for id, draft in pairs(snapshot.drafts) do records[id] = draft end
         return records
+    end
+    function store.eachActive(scope, fn)
+        if not region(scope) then return nil, "invalid_region" end
+        -- fn gets live records: it must not change or keep them. Listed first because fn may reenter and add some.
+        local records = {}
+        for _, bucket in ipairs({data.regions[scope] or {}, data.drafts}) do
+            for _, record in pairs(bucket) do records[#records + 1] = record end
+        end
+        for _, record in ipairs(records) do
+            if fn(record) == false then return false end
+        end
+        return true
     end
     function store.get(id)
         if not integer(id) then return nil, "invalid_id" end

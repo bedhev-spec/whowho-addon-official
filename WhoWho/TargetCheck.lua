@@ -107,10 +107,10 @@ local function conflict(record, region, name, guid)
     if not match or match.id ~= record.id or match.membership ~= "friend" then return true end
     for _, collection in ipairs(collections) do
         for id, seen in pairs(collection) do
-            local active = A.store.get(id)
-            if active and same(active, seen) and seen.region == region then
-                if id == record.id and seen.guid ~= guid then return true end
-                if id ~= record.id and seen.guid == guid then return true end
+            -- Only a changed GUID or a shared one can conflict; the record copy waits for that.
+            if (id == record.id) ~= (seen.guid == guid) then
+                local active = A.store.get(id)
+                if active and same(active, seen) and seen.region == region then return true end
             end
         end
     end
@@ -574,7 +574,8 @@ function check.clearNameplates()
 end
 function check.observeNameplate(unit, expectedFrame, owns)
     local store, region = A.store, A.region
-    if not store or not inContext(region) or not owns() then return false end
+    if not store or not inContext(region) or not owns()
+        or A.counts and A.recordsStore==store and A.counts.friend == 0 then return false end
     local frame = reader.playerPlate(unit, expectedFrame)
     if not frame then return false end
     local function playerPlate()

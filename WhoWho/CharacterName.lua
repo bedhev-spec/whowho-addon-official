@@ -19,7 +19,7 @@ function Name.CountScalars(text)
     return count
 end
 -- Only manual input is normalized: preserve token bytes, canonicalize separators.
-function Name.NormalizeManual(text, allowDraft)
+local function normalize(text, allowDraft)
     if not Name.CountScalars(text) then return nil end
     local parts, token, i, boundaryControl = {}, {}, 1, false
     while i <= #text do
@@ -50,6 +50,21 @@ function Name.NormalizeManual(text, allowDraft)
     if allowDraft and #parts==1 then return parts[1] end
     if #parts~=2 then return nil end
     return parts[1].." "..parts[2]
+end
+-- Unit, plate and chat events repeat the same names. false stands for a nil result.
+local cacheLimit=1024
+local caches={[false]={entries={},size=0},[true]={entries={},size=0}}
+function Name.NormalizeManual(text, allowDraft)
+    local draft=not not allowDraft
+    if type(text)~="string" then return normalize(text,draft) end
+    local cache=caches[draft]
+    local result=cache.entries[text]
+    if result==nil then
+        result=normalize(text,draft) or false
+        if cache.size>=cacheLimit then cache.entries,cache.size={},0 end
+        cache.entries[text],cache.size=result,cache.size+1
+    end
+    return result or nil
 end
 function Name.IsComplete(name)
     return type(name)=="string" and Name.NormalizeManual(name)==name
