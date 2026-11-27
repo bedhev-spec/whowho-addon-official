@@ -71,12 +71,9 @@ function invite.context()
     end
     capture("target")
     capture("mouseover")
-    local raid = read(IsInRaid)
-    local count
-    if raid == true then count = read(GetNumGroupMembers)
-    elseif raid == false then count = read(GetNumSubgroupMembers) end
-    if type(count) == "number" and count >= 0 and count % 1 == 0 and count <= (raid and 40 or 4) then
-        for i=1,count do capture((raid and "raid" or "party") .. i, true) end
+    local prefix, count = reader.groupRoster()
+    if prefix then
+        for i=1,count do capture(prefix .. i, true) end
     end
     if not live(context.store, context.region) or context.revision ~= revision then
         context.issue = "Invitation context changed. Try again."

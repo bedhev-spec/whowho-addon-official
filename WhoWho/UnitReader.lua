@@ -114,6 +114,11 @@ end
 local function classFilename(value)
     return readable(value) and type(value)=="string" and value:match("^[A-Z]+$") and value or nil
 end
+function unit.classForID(id)
+    if type(id)=="number" and id>=1 and id<math.huge and id%1==0 then
+        return classFilename(member(read(member(C_CreatureInfo, "GetClassInfo"), id), "classFile"))
+    end
+end
 function unit.class(token)
     if type(UnitClass) == "function" then
         local ok, _, value = pcall(UnitClass, token)

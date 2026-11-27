@@ -192,13 +192,11 @@ local function manualSnapshot(isCurrent)
     end
     if not valid() then return nil end
     local staged, units, names, guids = {}, {}, {}, {}
-    local raid = read(IsInRaid)
-    local countReader = raid == true and GetNumGroupMembers or GetNumSubgroupMembers
-    local count = type(raid) == "boolean" and read(countReader) or nil
-    if type(count) == "number" and count == count and count % 1 == 0 and count >= 0 and count <= (raid and 40 or 4) then
-        local reader = A.unitReader
+    local reader = A.unitReader
+    local prefix, count, groupSource = reader.groupRoster()
+    if prefix then
         for i=1,count do
-            local token = (raid and "raid" or "party") .. i
+            local token = prefix .. i
             if read(UnitExists, token) == true and read(UnitIsUnit, token, "player") == false and reader.identitySafe(token) then
                 local name, guid, online = reader.name(token), reader.guid(token), read(UnitIsConnected, token)
                 if type(name) == "string" and name:match("^%S+%s+%S+$") and type(guid) == "string" and guid ~= "" then
@@ -212,7 +210,7 @@ local function manualSnapshot(isCurrent)
                 local record = store.find(region, row.name, row.guid)
                 if record and record.membership == "friend" and record.region == region and record.fullName == row.name then
                     staged[record.id] = {Group={id=record.id, region=region, name=row.name, guid=row.guid,
-                        online=row.online, source=raid and "Raid" or "Party", kind="checked", token=row.token}}
+                        online=row.online, source=groupSource, kind="checked", token=row.token}}
                 end
             end
         end
@@ -223,7 +221,8 @@ local function manualSnapshot(isCurrent)
         if not ok then return nil end
     end
     if not valid() then return nil end
-    local groupReady = #units > 0 and read(IsInRaid) == raid and read(countReader) == count
+    local livePrefix, liveCount = reader.groupRoster()
+    local groupReady = #units > 0 and livePrefix == prefix and liveCount == count
     local guildClub = read(member(C_Club, "GetGuildClubId"))
     local guildReady, recentReady = ready("Guild", guildClub), ready("Recent Allies")
     local groupRead, recheckGuild, recheckRecent = false, false, false
