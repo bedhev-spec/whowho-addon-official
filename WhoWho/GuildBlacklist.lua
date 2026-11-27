@@ -11,6 +11,7 @@ local REVISION_TICKS, MAX_SERVER_TIME, CLOCK_SKEW = 128.0, 4294967295, 5
 local MAX_REVISION = (MAX_SERVER_TIME+1)*REVISION_TICKS-1
 local SEND_INTERVAL, SYNC_INTERVAL, REPLY_INTERVAL, MEMBERSHIP_SETTLE = 1.25, 30, 90, 0.75
 local SCOPE_WAITS = {3, 6, 12, 24, 48, 84}
+local MAX_MEMBERS, CONFIRM_DELAY, LEAVE_DELAY = 256, 3, 60
 local SAMPLE_WINDOW, SAMPLE_LIFETIME, MAX_ACKS, MAX_RESPONDERS = 12, 60, 8, 1024
 -- ChatConstantsDocumentation.lua for the pinned Forever build.
 local SUCCESS, DUPLICATE_PREFIX, ADDON_THROTTLE, CHANNEL_THROTTLE, LOCKDOWN = 0, 1, 3, 8, 11
@@ -22,8 +23,9 @@ local classes = {
 local installed, inWorld, registered, storageReady, chatRestricted
 local state, status, generation, eventVersion = nil, "unavailable", 0, 0
 local db, scopeCount, checking, settling, lastMembershipKey
+local sighting, guildEvent, leaving, due, lastCharacter, homeRead
 local nextSend = 0
-local schedule
+local schedule, currentState
 
 local function plain(value)
     return safeTable(value) and getmetatable(value) == nil
@@ -230,6 +232,40 @@ local function loadStore(saved)
     return scopes, count, migrated
 end
 
+local function validMember(character, key)
+    if not readable(character) or not readable(key) or type(character) ~= "string" or type(key) ~= "string" then return end
+    local region, name=character:match("^(%d+):(.+)$")
+    local guildRegion, club=key:match("^(%d+):(%d+)$")
+    if region and region == guildRegion and validName(name) and scopeKey(tonumber(region),club) == key then return key end
+end
+
+local function recordedGuild(character)
+    local members=WhowhoGuildBlacklistDB and WhowhoGuildBlacklistDB.members
+    if plain(members) then return validMember(character,members[character]) end
+end
+
+-- A guild event can meet a stale club ID, so only a guild already read this world session is left at once.
+-- Reading it again also ends the window: a later other club ID is then unproven.
+local function atHome(character, key)
+    homeRead,guildEvent=character.."="..key,nil
+end
+
+local function recordMember(seen)
+    if not seen.confirmed or not db[seen.key] or recordedGuild(seen.character) then return end
+    local members=WhowhoGuildBlacklistDB.members
+    if not plain(members) then
+        members={}
+        WhowhoGuildBlacklistDB.members=members
+    end
+    local size=0
+    for _ in pairs(members) do size=size+1 end
+    -- shortcut: past the cap a new character is not recorded, so it cannot keep a list that another one leaves.
+    if size < MAX_MEMBERS or members[seen.character] ~= nil then
+        members[seen.character]=seen.key
+        atHome(seen.character,seen.key)
+    end
+end
+
 local function publish(current)
     if not db[current.key] then
         db[current.key]=current.data
@@ -243,6 +279,7 @@ local function publish(current)
         WhowhoGuildBlacklistDB.removed=WhowhoGuildBlacklistDB.removed or {}
         WhowhoGuildBlacklistDB.removed[current.key]=records
     end
+    if sighting and sighting.key == current.key then recordMember(sighting) end
 end
 
 local function notify()
@@ -290,17 +327,28 @@ local function clearInterruptedWork(current)
 end
 
 -- Membership owns rows and queued work. Ready tokens additionally require a usable transport.
-local function verify()
+local function refresh(found)
     if checking or settling and not settling.awaitingVerification then return nil, "unavailable" end
     checking=true
     local event=eventVersion
+    local character=inWorld and storageReady and A.currentCharacterName()
     local key, nextStatus, region, at=nativeContext()
+    local guild=key
+    if character and nextStatus == "no_guild" then
+        region=read(GetCurrentRegion)
+        local ok, club=pcall(member(C_Club,"GetGuildClubId"))
+        -- An unreadable club ID is unknown membership, not "no guild".
+        if ok and readable(club) and integer(region,2147483647) and not scopeKey(region,club) then guild=false end
+    end
     checking=false
     if event ~= eventVersion then return nil, "unavailable" end
     if settling then
         -- With no settlement timer, a stale previous club cannot confirm membership.
         if nextStatus ~= "no_guild" and (not key or key == settling.previous) then return nil, "unavailable" end
         settling=nil
+    end
+    if character and guild ~= nil then
+        found.character,found.key,found.at=string.format("%d:%s",region,character),guild,at
     end
     if key or nextStatus == "no_guild" then lastMembershipKey=key end
     nextStatus=nextStatus or "unavailable"
@@ -332,7 +380,82 @@ local function verify()
     return state, status, true
 end
 
-local currentState
+local function later(delay, fn)
+    local after=member(C_Timer,"After")
+    return type(after) == "function" and pcall(after,delay,fn)
+end
+
+local function reread()
+    if not inWorld or checking or settling or not storageReady then return end
+    local _, _, changed=currentState()
+    if changed then notify() end
+end
+
+local function eraseLeft(character, key)
+    if state and state.key == key then return end
+    local members, kept=WhowhoGuildBlacklistDB.members, false
+    for other, guild in pairs(members) do
+        if validMember(other,guild) == key and other ~= character then kept=true end
+    end
+    if not kept then
+        if db[key] then
+            db[key]=nil
+            scopeCount=scopeCount-1
+        end
+        -- The loader rejects removal records without their scope.
+        WhowhoGuildBlacklistDB.scopes[key]=nil
+        if WhowhoGuildBlacklistDB.removed then WhowhoGuildBlacklistDB.removed[key]=nil end
+    end
+    members[character]=nil
+end
+
+local function startLeave(character, from, key)
+    if leaving and leaving.character == character and leaving.from == from and leaving.key == key then return end
+    local ticket={character=character,from=from,key=key}
+    leaving=ticket
+    if not later(LEAVE_DELAY,function()
+        if leaving ~= ticket then return end
+        leaving,due=nil,ticket
+        reread()
+        due=nil
+    end) then leaving=nil end
+end
+
+-- found.key is the current guild, or false for a confirmed "no guild".
+local function track(found)
+    local character, key=found.character, found.key
+    lastCharacter=character
+    local home=recordedGuild(character)
+    if home == key then
+        leaving=nil
+        atHome(character,key)
+    end
+    if home and home ~= key then
+        -- One reading may be stale; only a settled guild event makes another guild conclusive.
+        if key and guildEvent and homeRead == character.."="..home
+            or due and due.character == character and due.from == home and due.key == key then
+            leaving=nil
+            eraseLeft(character,home)
+        else
+            startLeave(character,home,key)
+        end
+    end
+    if not key then sighting=nil; return end
+    if not sighting or sighting.character ~= character or sighting.key ~= key or sighting.event ~= eventVersion then
+        sighting={character=character,key=key,event=eventVersion,at=found.at}
+        -- Nothing else guarantees the second reading that confirms membership.
+        if not guildEvent and home ~= key then later(CONFIRM_DELAY+1,reread) end
+    end
+    if guildEvent or sighting.at and found.at and found.at-sighting.at >= CONFIRM_DELAY then sighting.confirmed=true end
+    recordMember(sighting)
+end
+
+local function verify()
+    local found={}
+    local current, currentStatus, changed=refresh(found)
+    if found.character then track(found) end
+    return current, currentStatus, changed
+end
 
 -- The club ID can become readable without any event, so a missing scope is read again.
 -- Each event that resets the waits retires the pending timer, so its waits start again.
@@ -1054,8 +1177,18 @@ end
 
 local function confirmMembership(ticket, requireNewScope)
     if settling ~= ticket or ticket.awaitingVerification then return end
-    if requireNewScope then ticket.awaitingVerification=true else settling=nil end
+    if requireNewScope then
+        ticket.awaitingVerification=true
+    else
+        settling=nil
+        guildEvent=ticket
+    end
     local _, _, changed=currentState()
+    -- The settled reading can still show the old guild with no later event. The follow-up also ends the window.
+    if not (lastCharacter and recordedGuild(lastCharacter) and later(LEAVE_DELAY-MEMBERSHIP_SETTLE,function()
+        reread()
+        if guildEvent == ticket then guildEvent=nil end
+    end)) and guildEvent == ticket then guildEvent=nil end
     if state then schedule(state) end
     if changed then notify() end
 end
@@ -1066,6 +1199,7 @@ local function membershipChanged()
     local requireNewScope=settling and (settling.awaitingVerification or settling.requireNewScope)
     local ticket={previous=lastMembershipKey, requireNewScope=requireNewScope}
     settling=ticket
+    guildEvent,sighting=nil,nil
     local changed=status ~= "unavailable" or state and state.readToken ~= nil
     status="unavailable"
     if state then
@@ -1120,6 +1254,7 @@ function G.install()
             settling=nil
             lastMembershipKey=nil
             chatRestricted=nil
+            guildEvent,sighting,leaving,homeRead=nil,nil,nil,nil
         end
         eventVersion,scopeTries=eventVersion+1,0
         if checking and not inWorld then

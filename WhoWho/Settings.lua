@@ -40,16 +40,18 @@ local function paintSwatch(button)
     button.ring:SetVertexColor(unpack(checked and C.text or C.muted))
 end
 
-local swatchHitSize,swatchGap=36,8
+local swatchHitSize,swatchGap=30,8
 local function interfaceSwatch(parent,preset)
     local button=CreateFrame("CheckButton",nil,parent)
     button:SetSize(swatchHitSize,swatchHitSize)
     local circle=CreateFrame("Frame",nil,button)
-    circle:SetSize(24,24); circle:SetPoint("CENTER")
+    circle:SetSize(20,20); circle:SetPoint("CENTER")
     local fill=P.Material(circle,"RoundFill")
     fill:SetVertexColor(unpack(preset.swatch))
     button.ring=P.Material(circle,"RoundEdge",nil,"ARTWORK")
-    button.mark=P.Glyph(circle,"online",14,preset.swatchInk)
+    -- Outside the circle, so a pale swatch cannot swallow the ring.
+    button.ring:ClearAllPoints(); button.ring:SetSize(26,26); button.ring:SetPoint("CENTER")
+    button.mark=P.Glyph(circle,"online",12,preset.swatchInk)
     button.mark:SetPoint("CENTER")
     button:SetScript("OnClick",function(self)
         P.SetInterfaceColor(preset.id)

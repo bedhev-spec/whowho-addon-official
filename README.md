@@ -18,6 +18,8 @@ Use the **Guild Blacklist** to share selected entries with guildmates who use Wh
 
 Any guild member with an up-to-date WhoWho can delete a Guild Blacklist entry, and the deletion applies to the whole guild. WhoWho always asks you to confirm it. Guildmates catch up when they sync with a member who has the deletion, while older versions of WhoWho keep the entry. Only adding the player again on the **Guild Blacklist** page brings it back; sharing a Personal Blacklist entry does not.
 
+When your character leaves a guild, WhoWho erases the Guild Blacklist saved for it, including its deletion history, unless another of your characters keeps it. Joining another guild while playing erases it at once. Otherwise it takes about a minute, or happens the next time you play that character. Only guilds that character was seen in with this version are covered. Another of your characters keeps the list only if you have played it in that guild with this version, long enough for WhoWho to notice it while the guild's list was saved. A character you have not played since upgrading, such as a bank alt, does not count. Guildmates are not affected.
+
 ### Quick Add
 
 Right-click a character's name in supported chat messages, or right-click their target, focus, party, or raid frame. Choose **WhoWho Add**, then **Friends** or **Blacklist**. The menu appears when Forever gives WhoWho enough information to identify the character.
@@ -26,7 +28,7 @@ You can also target a player and click **Add entry** in **Personal Blacklist** t
 
 ## Make it yours
 
-Choose Default, Cyan Slate, Harbor Blue, Moss Green, or Beige under **Settings → General**. Under **Alerts**, you can adjust banner opacity and sound volume. Click **Test banner**, then drag the preview where you want alerts to appear.
+Choose Default, Cyan Slate, Harbor Blue, Moss Green, Beige, Graphite, or Umber under **Settings → General**. Under **Alerts**, you can adjust banner opacity and sound volume. Click **Test banner**, then drag the preview where you want alerts to appear.
 
 ## Screenshots
 
