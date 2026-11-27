@@ -18,6 +18,8 @@ La **Liste noire de guilde** permet de partager les entrées de votre choix avec
 
 Tout membre de la guilde disposant d’une version à jour de WhoWho peut supprimer une entrée de la liste noire de guilde, et la suppression vaut pour toute la guilde. WhoWho demande toujours une confirmation. Les autres membres sont mis à jour quand ils se synchronisent avec un membre qui a la suppression, mais les anciennes versions de WhoWho conservent l’entrée. Seul un nouvel ajout depuis la page **Liste noire de guilde** la rétablit ; partager une entrée de votre liste noire personnelle ne le fait pas.
 
+Quand votre personnage quitte une guilde, WhoWho efface la liste noire de guilde enregistrée pour celle-ci, y compris l’historique des suppressions, sauf si un autre de vos personnages y est encore enregistré. Rejoindre une autre guilde en jeu l’efface aussitôt. Sinon, cela prend environ une minute, ou se produit la prochaine fois que vous jouez ce personnage. Seules les guildes où ce personnage a été vu avec cette version sont concernées. Les membres de la guilde ne sont pas affectés.
+
 ### Ajout rapide
 
 Faites un clic droit sur le nom d’un personnage dans un message de discussion pris en charge, ou sur son cadre de cible, de focalisation, de groupe ou de raid. Choisissez **Ajouter à WhoWho**, puis **Amis** ou **Liste noire**. Le menu apparaît quand Forever fournit assez d’informations pour identifier le personnage.
