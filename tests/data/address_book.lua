@@ -57,6 +57,7 @@ local copied = assert(book.open(store.export()))
 visits = 0
 copied.eachActive(3, function()
     visits = visits + 1
+    if visits > #expected then return false end
     for i = 1, 20 do copied.add({fullName="Late N" .. visits .. "x" .. i, region=3, identityState="resolved", membership="friend"}, 100) end
 end)
 check(visits == #expected, "records added while iterating are not visited")

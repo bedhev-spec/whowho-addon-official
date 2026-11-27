@@ -322,7 +322,8 @@ end
 do
     local s=fresh()
     s:plate("nameplate1",ally,allyGuid,"Alliance")
-    s:removePlate("nameplate1")
+    -- The unit and frame stay readable, so only the removal event can stop the read.
+    s:event(removeEvent,"nameplate1")
     local before=s.reads()
     s:add(ally,allyGuid)
     check(s.reads()==before and not s:live(),"a removed plate is not read once its player is listed")

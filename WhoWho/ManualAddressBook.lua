@@ -45,7 +45,7 @@ local function refresh(at, metadataOnly)
         local item = { id=record.id, region=record.region, guid=record.guid, fullName=record.fullName, membership=record.membership,
             note=record.note, role=record.role, reasonIds=book.copy(record.reasonIds), createdAt=record.createdAt, updatedAt=record.updatedAt,
             favorite=record.membership=="friend" and record.favorite==true, identityState=record.identityState,
-            whisperMuted=book.copy(record.whisperMuted) }
+            whisperMuted=record.whisperMuted }
         if record.lastKnown then
             local class = record.lastKnown.class and record.lastKnown.class.value
             if record.membership == "friend" then
