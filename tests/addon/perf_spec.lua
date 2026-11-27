@@ -22,7 +22,7 @@ end
 local function fresh(db)
     local config={region=3,time=100,db=db}
     local p,s,e=H.fresh(root,nil,{484,800},config)
-    local units,frames,n={},{},{reads=0,groups=0}
+    local units,frames,n={},{},{reads=0}
     s.units=units
     e.date=os.date
     e.GetTime=function() return config.time end
@@ -73,7 +73,7 @@ local function person(i) return "Player N"..word(i),"Player-1-"..pad(i) end
 
 local function raid()
     local _,s,e,_,n=fresh()
-    e.IsInRaid=function() n.groups=n.groups+1; return true end
+    e.IsInRaid=function() return true end
     e.GetNumGroupMembers=function() return 40 end
     for i=1,40 do
         local name,guid=person(i)
@@ -85,40 +85,57 @@ local function raid()
     return s,n
 end
 
+-- The first event of a burst must scan at once; its reads are the cost of one scan.
+-- The window outlasts the roster settle time, so deferred work cannot look like a saving.
 local function burst(event)
     local s,n=raid()
+    local function settle() for _=1,8 do s:tick(.2) end end
     s:tick(1)
     local before=n.reads
     s:event(event)
     local single=n.reads-before
-    assert(single>0,"one event scans")
-    s:tick(1)
+    check(single>0,"one "..event.." scans at once")
+    settle()
     before=n.reads
     for _=1,20 do s:event(event) end
-    s:tick(.016)
-    return n.reads-before,single
+    settle()
+    local reads=n.reads-before
+    check(reads>=single,event.." burst is scanned")
+    return reads,single
 end
 
-for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280},{"roster","GROUP_ROSTER_UPDATE",4080}}) do
+for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280,20},{"roster","GROUP_ROSTER_UPDATE",4692,23}}) do
     local reads,single=burst(case[2])
-    bound(case[1].." burst native reads",reads,case[3])
-    bound(case[1].." burst full scans",math.floor(reads/single+.5),20)
+    bound(case[1].." burst name/GUID reads",reads,case[3])
+    bound(case[1].." burst full scans",math.floor(reads/single+.5),case[4])
 end
 
 for _,case in ipairs({{"empty book",false,1536},{"unmatched book",true,1536}}) do
-    local _,s,_,_,n=fresh()
+    local p,s,_,A,n=fresh()
+    local seen={check=0,sightings=0}
+    local function counted(target,key,name)
+        local original=target[key]
+        target[key]=function(...) seen[name]=seen[name]+1; return original(...) end
+    end
+    counted(A.nameplateCheck,"onEvent","check")
+    counted(p.BlacklistBanner,"sightingsNameplateEvent","sightings")
     if case[2] then
         s:add("Nobody Here","Player-9-00000001")
         s:add("Nobody There","Player-9-00000002","friend")
     end
     local before=n.reads
     for i=1,256 do s:plate("nameplate"..i,person(i)) end
-    bound("256 plates, "..case[1]..", native reads",n.reads-before,case[3])
+    check(A.automaticNameplatesEnabled() and seen.check==256 and seen.sightings==256,"both observers see every plate")
+    if case[2] then check(n.reads>before,"a listed book reads plates") end
+    bound("256 plates, "..case[1]..", name/GUID reads",n.reads-before,case[3])
 end
 
 do
-    local p,s,e=fresh()
-    local classReads,normalized=0,0
+    local p,s,e,A=fresh()
+    local classReads,normalized,published=0,0,0
+    e.RAID_CLASS_COLORS={MAGE={}}
+    local publish=A.publishPlayerEvidence
+    A.publishPlayerEvidence=function(...) published=published+1; return publish(...) end
     e.C_ChatInfo={InChatMessagingLockdown=function() return false end}
     e.GetPlayerInfoByGUID=function() classReads=classReads+1; return nil,"MAGE" end
     s.units.player={name="Current Character",guid="Player-1-99999999"}
@@ -132,11 +149,12 @@ do
         end
     end
     lines()
-    check(classReads>0,"chat lines reach the evidence cache")
+    check(published==100 and normalized>0 and classReads>0,"chat lines pass through the evidence cache")
     bound("100 chat lines, name normalizations",normalized,100)
     bound("100 chat lines, class reads",classReads,100)
     lines()
     bound("same 100 authors again, name normalizations",normalized,100)
+    bound("same 100 authors again, class reads",classReads,100)
 end
 
 do
@@ -170,7 +188,9 @@ do
     s.units.target={name=name,guid=guid}
     local before=A.store
     s:event("PLAYER_TARGET_CHANGED")
-    check(A.store~=before and n.reads>0,"the targeted Friend observation is saved")
+    local known=A.store.get(1).lastKnown
+    check(A.store~=before and n.reads>0 and known and known.class.value=="MAGE","the targeted Friend observation is saved")
+    check(calls.open>0 and calls.export>0,"the save is counted")
     bound("1000 records, store opens",calls.open,1)
     bound("1000 records, store exports",calls.export,2)
     bound("1000 records, activeRecords copies",calls.activeRecords,1)
