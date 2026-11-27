@@ -498,7 +498,7 @@ local function publishShare(current, name, class, reasons, approvedNote, first, 
     if record and record.gone then
         -- Restoring now would overwrite the unsent removal, so peers would never learn of it.
         local pending=current.pushRemoved[identity]
-        -- shortcut: the send queue is not saved, so a reload or guild change before the send still loses the removal for peers; persist pending removals if reported.
+        -- shortcut: the queue is not saved, so a reload or guild change empties it and a re-add before the next sync overwrites the removal for peers; persist pending removals if reported.
         -- A flush can end without a timer, so the refusal re-arms the send it waits for.
         if pending and pending.gone then schedule(current); return "unavailable" end
         local revision=nextRevision(first,last,record.rev)
@@ -988,12 +988,15 @@ local function receive(prefix, message, channel, sender)
                 if queue[identity] and not supersedes(queue[identity],record) then queue[identity]=nil end
             end
             if supersedes(record,current.data.removed[identity]) and (db[current.key] or scopeCount < MAX_SCOPES) then
-                if record.gone then
-                    dropRow(current.data,identity)
-                    forgetQueuedRow(current,identity)
-                end
                 putRecord(current.data,identity,record)
-                updated=true
+                -- At the cap an older record is evicted at once and must not drop the row, or a stale E restores it.
+                if current.data.removed[identity] == record then
+                    if record.gone then
+                        dropRow(current.data,identity)
+                        forgetQueuedRow(current,identity)
+                    end
+                    updated=true
+                end
             end
         end
         if updated then

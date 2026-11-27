@@ -152,7 +152,10 @@ end
 local function deleteRecord(target)
     local ok, issue
     if target.guild then
-        local called,result=pcall(P.GuildBlacklist.remove,target.name,target.token)
+        -- A paused transport resumes with a new write token; the read scope still identifies the same guild.
+        local token,_,scope=guildContext()
+        local called,result
+        if token and scope==target.scope then called,result=pcall(P.GuildBlacklist.remove,target.name,token) end
         ok=called and (result=="removed" or result=="missing")
         issue="Deleting is unavailable."
     else
@@ -603,7 +606,7 @@ local function requestGuildDelete(row,record)
     local token,_,scope=guildContext()
     if row.inputOwner~=owner or not guildPage() or not row:IsVisible() or rosterPointerBlocked() then return end
     if not token or scope~=record.scope then S.Refresh(); return end
-    showDeleteDialog(record,{guild=true,name=record.fullName,token=token})
+    showDeleteDialog(record,{guild=true,name=record.fullName,scope=record.scope})
     -- Can refresh and rebind rows at once, so the dialog target is captured first.
     requestGuildSync()
 end

@@ -1040,8 +1040,15 @@ do
     state.scope,state.entries="guild-b",{{name="Alpha|r Stone"}}
     S.RefreshGuildBlacklist()
     S.deleteConfirm:Click()
-    assert(#state.entries==1 and state.removes[1].scope=="guild-a"
+    assert(#state.entries==1 and #state.removes==0
         and S.deleteError:GetText()=="Deleting is unavailable.","a guild change deletes nothing")
+
+    reset(); delete:Click()
+    state.writeToken="resumed-token"
+    S.deleteConfirm:Click()
+    assert(not S.deleteDialog:IsShown() and #state.entries==2 and state.removes[1].scope=="resumed-token",
+        "a resumed transport deletes with its current write token")
+    state.writeToken=nil
 
     reset()
     state.status="unavailable"; S.RefreshGuildBlacklist()
