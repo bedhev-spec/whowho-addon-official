@@ -1,8 +1,7 @@
 name: Label from branch
 
 on:
-  # Needed to label PRs from forks; the job never checks out or runs PR code.
-  pull_request_target:
+  pull_request:
     types: [opened, reopened]
 
 permissions:
@@ -11,6 +10,8 @@ permissions:
 
 jobs:
   label:
+    # Fork PRs get a read-only token, so they cannot be labelled here.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
