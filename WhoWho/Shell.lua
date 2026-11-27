@@ -101,6 +101,16 @@ local function closeStaleGuildDelete()
     end
     S.deleteDialog:Hide()
 end
+local function paintPeers(peers)
+    S.guildPeers:SetText(L("WhoWho guildmates detected: %s",type(peers)=="number" and peers or "—"))
+end
+function S.RefreshGuildPeers(token)
+    if not (S.guildPeers and guildPage() and S.window:IsVisible() and S.guildPeers:IsShown()) then return end
+    local revision=paintRevision
+    local peers=P.GuildBlacklist.peerCount(token)
+    -- The native clock read can re-enter and repaint the page; that paint is newer.
+    if revision==paintRevision then paintPeers(peers) end
+end
 function S.RefreshGuildBlacklist()
     closeStaleGuildDelete()
     if S.editor then S.editor.RefreshGuildShare() end
@@ -338,7 +348,7 @@ function S.Refresh(resetSelectionScroll)
     if S.guildPeers then
         local showPeers=guild and scope~=nil
         if S.guildPeers:IsShown()~=showPeers then S.facetLayoutDirty=true end
-        S.guildPeers:SetText(showPeers and L("WhoWho guildmates detected: %s",type(peers)=="number" and peers or "—") or "")
+        if showPeers then paintPeers(peers) else S.guildPeers:SetText("") end
         S.guildPeers:SetShown(showPeers)
     end
     local active=not guild and S.RefreshFilterMenu(blacklist) or 0
