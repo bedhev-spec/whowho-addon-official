@@ -809,6 +809,31 @@ do
     assert(s.forbiddenCalls==0)
 end
 
+do
+    local p,s,_,S,state=fresh()
+    state.peers=3
+    local untouched=S.guildPeers:GetText()
+    S.RefreshGuildPeers("guild-a")
+    assert(S.guildPeers:GetText()==untouched,"another page is not painted")
+    S.nav.guildBlacklist:Click()
+    state.peers=4
+    S.RefreshGuildPeers("guild-a")
+    assert(S.guildPeers:GetText()=="WhoWho guildmates detected: 4")
+    local peerCount=p.GuildBlacklist.peerCount
+    p.GuildBlacklist.peerCount=function()
+        p.GuildBlacklist.peerCount=peerCount
+        state.peers=6; S.RefreshGuildBlacklist()
+        return 5
+    end
+    S.RefreshGuildPeers("guild-a")
+    assert(S.guildPeers:GetText()=="WhoWho guildmates detected: 6","a repaint during the count read wins")
+    S.Toggle()
+    state.peers=7
+    S.RefreshGuildPeers("guild-a")
+    assert(S.guildPeers:GetText()=="WhoWho guildmates detected: 6","a hidden window is not painted")
+    assert(s.forbiddenCalls==0)
+end
+
 local function checkGuildHeader(p,pane)
     local add=assert(button(pane,p.L("Add entry")))
     local title=assert(visibleText(pane,p.L("Guild Blacklist")))

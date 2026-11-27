@@ -147,7 +147,7 @@ do
     b:advance(5)
     check(a.g.peerCount(scope)==nil and a.g.requestSync() and not a.g.requestSync(),
         "opening during ordinary startup cooldown queues one count sample")
-    b:advance(26)
+    b:advance(25)
     local nonce, queryAt
     for _, packet in ipairs(b.packets) do
         if packet.client==a then
@@ -157,7 +157,7 @@ do
     end
     check(nonce and queryAt==130 and a.g.peerCount(scope)==nil and #refreshes==0,
         "the count uses one paced legacy-compatible query and stays pending")
-    b:advance(9)
+    b:advance(10)
     local acknowledgements={}
     for _, packet in ipairs(b.packets) do
         if packet.message:match("^A|") then
@@ -166,7 +166,7 @@ do
         end
     end
     check(not acknowledgements[a] and not acknowledgements[legacy] and not acknowledgements[other] and acknowledgements[first]==1
-        and acknowledgements[second]==2 and a.g.peerCount(scope)==nil,
+        and acknowledgements[second]==2 and a.g.peerCount(scope)==2,
         "hidden empty peers reply, throttling retries once, and the own echo cannot reply")
     event(a,"A|3:101|"..nonce,nil,nil,first.name)
     event(a,"A|3:202|"..nonce,nil,nil,"Wrong Guild")
@@ -2197,6 +2197,79 @@ do
     b:advance(0.8)
     check(db.scopes["3:101"]==nil and a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared"
         and db.scopes["3:202"],"the erased list frees its scope slot")
+end
+
+-- The count line follows each new guildmate while the sample is still collecting.
+do
+    local b=bus()
+    local a=b:client("Live Counter")
+    b:advance(5)
+    local S=a.p.Shell
+    local full,rescans,lines=0,0,0
+    local refresh,rescan,line=S.RefreshGuildBlacklist,a.p.BlacklistBanner.sightingsGuildChanged,S.RefreshGuildPeers
+    S.RefreshGuildBlacklist=function() full=full+1; refresh() end
+    a.p.BlacklistBanner.sightingsGuildChanged=function() rescans=rescans+1; rescan() end
+    S.RefreshGuildPeers=function(token) lines=lines+1; line(token) end
+    a.p.Toggle()
+    S.nav.guildBlacklist:Click()
+    local scope=a.g.context()
+    b:advance(25)
+    local nonce=assert(b.packets[#b.packets].message:match("^Q|3:101|(0%d+%.%d+)$"))
+    local function ack(sender,value) event(a,"A|3:101|"..(value or nonce),nil,nil,sender) end
+    local function shows(text) return S.guildPeers:GetText()=="WhoWho guildmates detected: "..text end
+    check(a.g.peerCount(scope)==nil and shows("—"),"no reply yet reports no count")
+    full,rescans=0,0
+    ack("Peer One")
+    check(a.g.peerCount(scope)==1 and shows("1") and lines==1,"the first reply paints at once")
+    ack("Peer One")
+    ack("Wrong Nonce","01.99999")
+    check(a.g.peerCount(scope)==1 and lines==1,"duplicate and wrong-nonce replies do not repaint")
+    ack("Peer Two")
+    check(a.g.peerCount(scope)==2 and shows("2") and lines==2 and full==0 and rescans==0,
+        "a counted reply repaints the line without a list rebuild or sighting rescan")
+    S.nav.friend:Click()
+    local before=S.guildPeers:GetText()
+    ack("Peer Three")
+    check(a.g.peerCount(scope)==3 and S.guildPeers:GetText()==before,"another page is not repainted")
+    S.nav.guildBlacklist:Click()
+    check(shows("3"),"returning to the page shows the running count")
+    S.Toggle()
+    ack("Peer Four")
+    check(a.g.peerCount(scope)==4 and shows("3"),"a hidden window is not repainted")
+    b:advance(12)
+    lines=0
+    ack("Too Late")
+    check(a.g.peerCount(scope)==4 and lines==0,"a late reply neither counts nor repaints")
+end
+
+do
+    local b=bus()
+    local a=b:client("Empty Window")
+    b:advance(5)
+    a.p.Toggle()
+    local S=a.p.Shell
+    S.nav.guildBlacklist:Click()
+    b:advance(36)
+    check(S.guildPeers:GetText()=="WhoWho guildmates detected: —","an open window without replies shows no count")
+    b:advance(7)
+    check(S.guildPeers:GetText()=="WhoWho guildmates detected: 0","zero appears only when the window ends empty")
+end
+
+do
+    local b=bus()
+    local a=b:client("Crowded Guild")
+    b:advance(5)
+    local scope=a.g.context()
+    check(a.g.requestSync(),"a sample is queued for the capped window")
+    b:advance(25)
+    local nonce=assert(b.packets[#b.packets].message:match("^Q|3:101|(0%d+%.%d+)$"))
+    local lines=0
+    a.p.Shell.RefreshGuildPeers=function() lines=lines+1 end
+    for index=1,1024 do event(a,"A|3:101|"..nonce,nil,nil,"Member "..index) end
+    check(a.g.peerCount(scope)==1024 and lines==1024,"each distinct guildmate raises the running count once")
+    event(a,"A|3:101|"..nonce,nil,nil,"Over Cap")
+    event(a,"A|3:101|"..nonce,nil,nil,"Further Over Cap")
+    check(a.g.peerCount(scope)==nil and lines==1024,"over-cap replies drop the count and do not repaint")
 end
 
 check(H.forbiddenCalls==0,"the fake bus never invokes real native actions")

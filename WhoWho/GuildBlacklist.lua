@@ -500,7 +500,7 @@ function G.peerCount(expectedScope)
     if checking or settling or not current or not readable(expectedScope) or not ownsReady(current,expectedScope) then return end
     local at=clock()
     local sample=current.sample
-    if at and ownsReady(current,expectedScope) and sample and sample.sent and not sample.responders
+    if at and ownsReady(current,expectedScope) and sample and sample.sent and (not sample.responders or sample.count > 0)
         and not sample.overflow and at < sample.expires then return sample.count end
 end
 
@@ -1055,6 +1055,9 @@ local function receiveAck(current, token, payload, sender)
     else
         sample.responders[sender]=true
         sample.count=sample.count+1
+        -- Only the count line: notify() would rebuild the list and rescan sightings per reply.
+        local refresh=P.Shell.RefreshGuildPeers
+        if refresh then refresh(token) end
     end
 end
 
