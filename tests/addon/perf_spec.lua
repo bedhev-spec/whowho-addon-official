@@ -129,6 +129,19 @@ for _,case in ipairs({{"empty book",{},0,0},{"unmatched Blacklist only",{"blackl
     bound("256 plates, "..case[1]..", name/GUID reads",n.reads-before,case[4])
 end
 
+-- A Friend sighting kept only for the session still blocks another record with its GUID.
+for _,case in ipairs({{"Player-1-00000001",false},{"Player-1-00000002",true}}) do
+    local _,s,e,A=fresh()
+    e.UnitClass=function() return "Mage","MAGE" end
+    e.UnitLevel=function() return 42 end
+    s:add("Ari North",nil,"friend")
+    s:add("Bea North",nil,"friend")
+    s:plate("nameplate1","Ari North","Player-1-00000001")
+    s.units.target={name="Bea North",guid=case[1]}
+    s:event("PLAYER_TARGET_CHANGED")
+    check((A.targetCheck.observations[2]~=nil)==case[2],"shared session GUID, "..case[1])
+end
+
 -- Cached name checks answer exactly as the first, uncached, call did.
 do
     local p=fresh()

@@ -301,6 +301,53 @@ do
     check(s:live() and s.A.store.get(record.id).lastKnown.guid==allyGuid,"a later matching book entry sees the owned plate")
 end
 
+-- Plates are not read while nothing is listed, and must not be lost by that.
+do
+    local s=fresh({plates={{"nameplate1",ally,allyGuid,"Alliance"}}})
+    check(s.reads()==0 and not s:live(),"a seeded plate is not read while nothing is listed")
+    s:add(ally,allyGuid)
+    check(s:live() and s.sounds()==1,"a plate on screen at login alerts once its player is listed")
+end
+
+for _,list in ipairs({"missing","unreadable"}) do
+    local s=fresh()
+    local frames=s.e.C_NamePlate.GetNamePlates
+    s.e.C_NamePlate.GetNamePlates=list=="unreadable" and function() return nil end or nil
+    s:plate("nameplate1",ally,allyGuid,"Alliance")
+    s:add(ally,allyGuid)
+    check(s:live() and s.sounds()==1,"a plate seen by its event needs no plate list: "..list)
+    s.e.C_NamePlate.GetNamePlates=frames
+end
+
+do
+    local s=fresh()
+    s:plate("nameplate1",ally,allyGuid,"Alliance")
+    s:removePlate("nameplate1")
+    local before=s.reads()
+    s:add(ally,allyGuid)
+    check(s.reads()==before and not s:live(),"a removed plate is not read once its player is listed")
+end
+
+do
+    local s=fresh()
+    local record=s:add(hostile,hostileGuid)
+    s:unit("target",nil)
+    assert(s.A.delete(record))
+    s:plate("nameplate1",ally,allyGuid,"Alliance",{restricted=true})
+    s:add(ally,allyGuid)
+    s.units.nameplate1.restricted=false
+    for _=1,20 do s:tick(1) end
+    check(s.sounds()==1,"a skipped plate that cannot be read yet is retried")
+end
+
+-- Unsettled guild membership cannot show that no list needs the plates.
+do
+    local s=fresh()
+    s.e.IsInGuild=function() return true end
+    s:plate("nameplate1",ally,allyGuid,"Alliance")
+    check(s.reads()>0,"plates are read while guild membership is unsettled")
+end
+
 do
     local s=fresh()
     s:add(ally,allyGuid)
