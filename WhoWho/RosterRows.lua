@@ -113,7 +113,11 @@ function R.Bind(row,record,section,selectedId,actionAvailable,inviteIssue,chatMu
     end
     if row.muteSlash then row.muteSlash:SetShown(personal and row.chatMuted==true or false) end
     row.copyButton:SetShown(not guild); row.inviteButton:SetShown(not guild)
-    if row.deleteButton then row.deleteButton:SetShown(not guild) end
+    if row.deleteButton then
+        local enabled=not guild or actionAvailable==true
+        P.SetEnabled(row.deleteButton,enabled)
+        row.deleteGlyph:SetVertexColor(unpack(enabled and C.deleteGlyph or C.disabled))
+    end
     if row.favoriteButton then
         local show=record and record.membership=="friend" and record.identityState~="unresolved"
         row.favoriteButton:SetShown(show==true)
@@ -237,7 +241,7 @@ local function createRow(parent,actions)
         row.deleteButton=P.Button(row,"",34,34,nil,"action")
         bindClick(row,row.deleteButton,actions.delete)
         row.deleteButton:SetPoint("RIGHT",-8,0)
-        local glyph=P.ActionGlyph(row.deleteButton,"close",22,C.deleteGlyph); glyph:SetPoint("CENTER")
+        row.deleteGlyph=P.ActionGlyph(row.deleteButton,"close",22,C.deleteGlyph); row.deleteGlyph:SetPoint("CENTER")
         P.Tooltip(row.deleteButton,L("Delete entry"))
     end
     row.inviteIcon=P.ActionGlyph(row.inviteButton,"plus",20,C.disabled); row.inviteIcon:SetPoint("CENTER",row.inviteButton,"CENTER",0,0)

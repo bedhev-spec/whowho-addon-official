@@ -368,10 +368,12 @@ function P.CreateSettings(window,S)
         P.Tooltip(guildRow.control,L("If you feel comfortable, consider talking with the player or a guild officer first."))
         guildRow.control:HookScript("OnHide",P.HideTooltip)
         muteRows={muteRow,partyRaidRow,cityTradeRow,guildRow}
-        deleteRow=toggleRow(general,"Skip delete confirmation","Applies to both lists.",
+        deleteRow=toggleRow(general,"Skip delete confirmation","Applies to Friends and Personal Blacklist.",
             "Deleting is unavailable.",function() return P.db.skipDeleteConfirmation end,
             function(value) P.db.skipDeleteConfirmation=value; return true end,storeReady)
         S.skipDeleteConfirmation=deleteRow.control
+        P.Tooltip(deleteRow.control,L("Guild Blacklist deletion is always confirmed."))
+        deleteRow.control:HookScript("OnHide",P.HideTooltip)
     end
     local audioNote
     if not P.manual then
