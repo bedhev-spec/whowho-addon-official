@@ -494,6 +494,7 @@ local function publishShare(current, name, class, reasons, approvedNote, first, 
         if noteRev then note=approvedNote end
     end
     local record, restored=current.data.removed[identity]
+    -- shortcut: a restore does not date rows, so a peer that missed the removal can merge old reasons and note back; tie a row data revision to the restore.
     if record and record.gone then
         local revision=nextRevision(first,last,record.rev)
         if not revision then return "unavailable" end
@@ -560,6 +561,7 @@ function G.add(name, reasonIds, note, expectedScope, ownsSave)
     if N.Key(name) == N.Key(playerName) then return "self" end
     -- All native policy/scope reads must finish before the first durable row or queue change.
     if ownsSave and not ownsSave() or not ownsReady(current,expectedScope) then return "unavailable" end
+    -- shortcut: an Add before the removal arrives writes no record, so that older removal drops its row; record every direct Add.
     return publishShare(current,name,nil,reasons,note ~= "" and note or nil,first,last)
 end
 

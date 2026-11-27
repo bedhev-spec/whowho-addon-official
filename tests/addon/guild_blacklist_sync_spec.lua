@@ -1593,6 +1593,18 @@ end
 
 do
     local b=bus()
+    local a=b:client("Cutoff Remover",{shared=seededCache(512)})
+    b:advance(2)
+    local scope=a.g.context()
+    check(a.g.remove("Seed99 Subject",scope)=="removed" and a.g.add("Alpha Subject",{"fraud"},nil,scope)=="shared"
+        and a.g.add("Beta Subject",{"fraud"},nil,scope)=="shared","removing the byte-last row keeps the cap usable")
+    local entries=rows(a)
+    check(#a.g.list()==512 and entries["Alpha Subject"] and entries["Beta Subject"] and not entries["Seed98 Subject"],
+        "the next addition at capacity displaces the new byte-last row")
+end
+
+do
+    local b=bus()
     local shared={version=1,scopes={}}
     for club=1,32 do shared.scopes["3:"..(500+club)]={} end
     local a=b:client("Scope Limited",{shared=shared})
