@@ -70,7 +70,6 @@ function P.EditorDialog.Create(parent, options)
     local savingGuild=false
     local savingForm=false
     local formRevision=0
-    local nextId=0
     local w=parent
     local nameColorRevision,paintingName=0,false
     local function currentRecord(target)
@@ -82,10 +81,6 @@ function P.EditorDialog.Create(parent, options)
     end
     local function nameClass(name,store,region)
         local A=P.manual
-        if not A then
-            local evidence=options.classEvidence[name]
-            return evidence and evidence.class
-        end
         if not store or region~=draft.region or not Name.IsComplete(name) then return end
         local evidence=draft.addEvidence
         if evidence and (evidence.name~=name or evidence.region~=region) then evidence=nil end
@@ -120,12 +115,12 @@ function P.EditorDialog.Create(parent, options)
         local wasPainting=paintingName
         paintingName=true
         local A,field=P.manual,controls.formName
-        local store,region=A and A.store,A and A.region
+        local store,region=A.store,A.region
         local name=field:GetText()
-        if A then name=A.text(name) end
+        name=A.text(name)
         local class,owner=nameClass(name,store,region)
         local r,g,b,a=P.NameColor(nil,nil,class)
-        if A and class then
+        if class then
             local currentRegion=A.nativeRead.read(GetCurrentRegion)
             local checkedClass,checkedOwner=nameClass(name,A.store,A.region)
             if currentRegion~=region or A.store~=store or A.region~=region or checkedClass~=class or checkedOwner~=owner then
@@ -142,7 +137,7 @@ function P.EditorDialog.Create(parent, options)
     end
     controls.form=P.CreateDialog(w,"WhowhoPreviewForm",options.backdrop); controls.form:SetSize(440,570); controls.formTitle=placeLabel(controls.form,"",24,-19,"record",C.text)
     local actionRule=P.Rule(controls.form,24,497,24)
-    controls.formHint=placeLabel(controls.form,P.manual and "Manual address book." or "Sample edits reset on reload.",24,-52,"small",C.muted)
+    controls.formHint=placeLabel(controls.form,"Manual address book.",24,-52,"small",C.muted)
     controls.nameLabel=placeLabel(controls.form,"Full character name (required)",24,-80,"section",C.text)
     controls.formName=edit(controls.form,392,38); controls.formName:SetPoint("TOPLEFT",24,-104)
     controls.formName:SetScript("OnTextChanged",function()
@@ -201,7 +196,7 @@ function P.EditorDialog.Create(parent, options)
         button.mark=P.Glyph(box,"online",16,C.text)
         button.mark:SetPoint("CENTER")
     end
-    if P.manual then
+    do
         reasonGroup=CreateFrame("Frame",nil,controls.form)
         reasonGroup:SetSize(392,128)
         reasonGroup:SetPoint("TOPLEFT",24,-154)
@@ -273,7 +268,7 @@ function P.EditorDialog.Create(parent, options)
         paintChoice(guildChoice)
         arrangeGuildChoice()
     end
-    if P.manual then
+    do
         local function checkbox(caption,x,y,width)
             local choice=CreateFrame("CheckButton",nil,controls.form)
             choice:SetSize(width,25)
@@ -313,7 +308,7 @@ function P.EditorDialog.Create(parent, options)
     controls.formNote:SetScript("OnTextChanged",function(self)
         formRevision=formRevision+1
         if draft.noteLoading then return end
-        local value=self:GetText(); if P.manual then value=P.manual.text(value) end; value=value or ""; local count=Name.CountScalars(value)
+        local value=self:GetText(); value=P.manual.text(value); value=value or ""; local count=Name.CountScalars(value)
         if not count or (count>256 and value~=draft.noteOriginal) then
             draft.noteLoading=true; self:SetText(draft.noteAccepted or ""); draft.noteLoading=false
             self:SetCursorPosition(draft.noteCursor or 0)
@@ -346,7 +341,7 @@ function P.EditorDialog.Create(parent, options)
         if draft.duplicateTarget then
             local target=draft.duplicateTarget
             local currentName=controls.formName:GetText()
-            if P.manual then currentName=P.manual.text(currentName); if currentName then currentName=Name.NormalizeManual(currentName) end end
+            currentName=P.manual.text(currentName); if currentName then currentName=Name.NormalizeManual(currentName) end
             if currentName==target.fullName then
                 local current=currentRecord(target)
                 if current then controls.form:Hide(); options.onOpenDuplicate(current); return end
@@ -355,19 +350,18 @@ function P.EditorDialog.Create(parent, options)
         end
         local evidence=draft.addEvidence
         local name=controls.formName:GetText(); local note=controls.formNote:GetText()
-        if P.manual then name=P.manual.text(name); note=P.manual.text(note) end
+        name=P.manual.text(name); note=P.manual.text(note)
         if not name or not note then controls.formError:SetText(L("Text unavailable; no changes saved.")); return end
         local enteredName=name
         local count=Name.CountScalars(note)
-        local mayDraft=P.manual and draft.formSection=="friend" and not draft.moving
-        if P.manual and draft.formRecord and draft.formRecord.identityState~="unresolved" then
+        local mayDraft=draft.formSection=="friend" and not draft.moving
+        if draft.formRecord and draft.formRecord.identityState~="unresolved" then
             if name~=draft.formRecord.fullName then controls.formError:SetText(L("Name is fixed for this saved character.")); return end
-        elseif P.manual then name=Name.NormalizeManual(name,mayDraft)
-        elseif not string.match(name,"^%S+%s+%S+$") then name=nil end
-        if not name then draft.nameError=true; controls.formError:SetText(L(P.manual and "Enter two name parts separated by a space." or "Enter a full two-part sample name.")); controls.formName:SetFocus(); return end
+        else name=Name.NormalizeManual(name,mayDraft) end
+        if not name then draft.nameError=true; controls.formError:SetText(L("Enter two name parts separated by a space.")); controls.formName:SetFocus(); return end
         if not count or (count>256 and note~=draft.noteOriginal) then controls.formError:SetText(L("Note must be valid text of at most 256 characters.")); return end
         local reasons
-        if P.manual and draft.formSection=="blacklist" then
+        if draft.formSection=="blacklist" then
             reasons={}; for _, reason in ipairs(P.manual.reasons) do if draft.selectedReasons[reason.id] then reasons[#reasons+1]=reason.id end end
             if not P.manual.validReasons(reasons) then
                 controls.formError:SetText("")
@@ -382,7 +376,7 @@ function P.EditorDialog.Create(parent, options)
         local directScope,alsoPersonal=draft.directGuildScope,draft.alsoPersonal
         local function ownsSave()
             if not controls.form:IsShown() or formRevision~=inputRevision or draft.addEvidence~=evidence
-                or draft.region~=formRegion or P.manual and P.manual.region~=formRegion or draft.formSection~=section
+                or draft.region~=formRegion or P.manual.region~=formRegion or draft.formSection~=section
                 or draft.formRecord~=original or draft.formRoleValue~=role or draft.moving~=moving
                 or (draft.shareGuild and draft.guildScope or nil)~=guildScope or draft.directGuildScope~=directScope or draft.alsoPersonal~=alsoPersonal or draft.duplicateTarget then return false end
             if reasons then
@@ -410,7 +404,7 @@ function P.EditorDialog.Create(parent, options)
             if saved then controls.form:Hide(); return end
             controls.formError:SetText(L(issue)); return
         end
-        local complete=not P.manual or Name.IsComplete(name)
+        local complete=Name.IsComplete(name)
         local editingId=draft.formRecord and draft.formRecord.id
         for _, existing in ipairs(options.records) do if complete and existing.identityState~="unresolved"
             and existing~=draft.formRecord and (not editingId or existing.id~=editingId) and existing.fullName==name then
@@ -422,7 +416,7 @@ function P.EditorDialog.Create(parent, options)
             controls.formCancel:ClearAllPoints(); controls.formCancel:SetPoint("BOTTOMRIGHT",-(actionWidth+36),24)
             controls.formName:SetFocus(); return
         end end
-        if options.save then
+        do
             local quickAdd=evidence and evidence.quickAdd
             local lookupClass=draft.formSection=="blacklist" and not draft.moving and draft.playerMenuName~=name and not quickAdd
             if lookupClass and original then
@@ -443,14 +437,6 @@ function P.EditorDialog.Create(parent, options)
             if not saved then controls.formError:SetText(L(issue)); return end
             controls.form:Hide(); options.onSaved(saved,guildScope,approval,lookupClass); return
         end
-        local record=draft.formRecord
-        if not record then nextId=nextId+1; record={id="added-" .. nextId,membership=draft.formSection,source="Sample entry"}; table.insert(options.records,record) end
-        if record.fullName~=name then
-            record.class=nil; record.level=nil; record.evidenceName=nil
-            record.presence=nil; record.connectionEvidence=nil; record.source=nil; record.observed=nil; record.attempt=nil
-        end
-        local evidence=options.classEvidence[name]; if evidence then record.class=evidence.class; record.evidenceName=name; record.level=evidence.level end
-        record.fullName=name; record.note=note; record.role=draft.formRoleValue; controls.form:Hide(); options.onSaved(record)
     end
     controls.formSave=P.Button(controls.form,L("Save"),94,34,function()
         if savingForm then return end
@@ -467,14 +453,14 @@ function P.EditorDialog.Create(parent, options)
         if draft.formSection~="blacklist" then controls.formSave:Click() end
     end)
     controls.formCancel=P.Button(controls.form,L("Cancel"),86,34,function() controls.form:Hide() end); controls.formCancel:SetPoint("BOTTOMRIGHT",-130,24)
-    if P.manual then P.RoundButton(controls.formSave,true); P.RoundButton(controls.formCancel) end
+    P.RoundButton(controls.formSave,true); P.RoundButton(controls.formCancel)
 
     local function open(record, section, query, noResults, moving, directGuildScope, name, evidence, fromPlayerMenu)
         if savingGuild then return end
         if directGuildScope and (controls.form:IsShown() or guildContext()~=directGuildScope or controls.form:IsShown()) then return end
         formRevision=formRevision+1
         draft.formRecord = record; draft.formSection=section; draft.formRoleValue=record and record.role or nil; draft.moving=moving
-        draft.region=P.manual and P.manual.region
+        draft.region=P.manual.region
         draft.addEvidence=evidence
         draft.playerMenuName=fromPlayerMenu and name or nil
         local blacklist=section=="blacklist"
@@ -482,14 +468,14 @@ function P.EditorDialog.Create(parent, options)
         draft.canShareGuild=blacklist and not directGuildScope and (not record or moving)
         roleGroup:SetShown(not blacklist)
         updateRoles()
-        local hasReasons=blacklist and P.manual
+        local hasReasons=blacklist
         local noteY=hasReasons and -290 or -222
         noteLabel:SetText(L(directGuildScope and "Shared note (optional)" or "Personal note (optional)"))
         noteLabel:ClearAllPoints(); noteLabel:SetPoint("TOPLEFT",24,noteY)
         controls.formCounter:ClearAllPoints(); controls.formCounter:SetPoint("TOPRIGHT",-24,noteY-3)
         controls.noteView:ClearAllPoints(); controls.noteView:SetPoint("TOPLEFT",24,hasReasons and -316 or -250)
         controls.noteView:SetHeight(hasReasons and 130 or 196)
-        if P.manual then
+        do
             reasonGroup:SetShown(blacklist)
             draft.selectedReasons={}
             if blacklist and record and not moving and P.manual.validReasons(record.reasonIds) then
@@ -514,7 +500,7 @@ function P.EditorDialog.Create(parent, options)
         controls.formTitle:SetText(L(directGuildScope and "Add Guild Blacklist entry" or moving and "Move to Blacklist" or (section=="blacklist" and (record and "Edit entry" or "Add entry") or (record and "Edit friend" or "Add friend"))))
         local candidate=name or ""
         if not record and noResults then
-            local full=P.manual and Name.NormalizeManual(query) or (not P.manual and string.match(query,"^%S+%s+%S+$"))
+            local full=Name.NormalizeManual(query)
             if full then
                 local exists=false; for _, existing in ipairs(options.records) do if existing.fullName==full then exists=true; break end end
                 if not exists then candidate=full end
@@ -525,12 +511,12 @@ function P.EditorDialog.Create(parent, options)
         controls.formName:SetText(record and record.fullName or candidate)
         draft.nameLoading=false
         controls.formNote:SetText(record and (record.note or "") or ""); controls.noteView:SetVerticalScroll(0)
-        local initialNote=controls.formNote:GetText(); if P.manual then initialNote=P.manual.text(initialNote) end
+        local initialNote=P.manual.text(controls.formNote:GetText())
         draft.noteAccepted=initialNote or ""; draft.noteOriginal=draft.noteAccepted; draft.noteCursor=controls.formNote:GetCursorPosition(); draft.noteLoading=false
         controls.formCounter:SetText(tostring(Name.CountScalars(draft.noteAccepted) or 0) .. " / 256")
         setGuildShare(draft.canShareGuild and guildContext() or nil,P.db.guildBlacklistDefaultWithNote)
         controls.formError:SetText(""); controls.form:Show(); controls.form:Raise()
-        if P.manual and record and record.identityState~="unresolved" then controls.formNote:SetFocus() else controls.formName:SetFocus() end
+        if record and record.identityState~="unresolved" then controls.formNote:SetFocus() else controls.formName:SetFocus() end
         if name then controls.formName:SetCursorPosition(#name) end
         paintName()
     end

@@ -147,7 +147,6 @@ function P.NameColor(record, whiteRosterName, verifiedClass)
         if type(issecretvalue)~="function" then return false end
         local ok, secret=pcall(issecretvalue,value)
         if not ok or secret~=false or type(value)~="table" then return false end
-        if not P.manual then return true end
         if type(issecrettable)~="function" then return false end
         local checked, hidden=pcall(issecrettable,value)
         if not checked then return false end

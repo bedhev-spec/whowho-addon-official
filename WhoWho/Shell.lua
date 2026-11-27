@@ -10,7 +10,7 @@ local roster,rows=P.RosterModel,P.RosterRows
 local paintRevision=0
 local guildScope,guildWriteToken
 local function guildPage() return S.section=="guildBlacklist" end
-local function blacklistPage() return P.manual and (S.section=="blacklist" or guildPage()) end
+local function blacklistPage() return S.section=="blacklist" or guildPage() end
 local function displayText(text) return (text:gsub("|","||")) end
 local function guildContext()
     local backend=P.GuildBlacklist
@@ -42,7 +42,7 @@ end
 local edit=P.Field
 local function fieldText(field)
     local value=field:GetText()
-    if P.manual then value=P.manual.text(value) end
+    value=P.manual.text(value)
     return value or ""
 end
 -- Title and note keep their full text in the existing record. Overflow can be
@@ -78,12 +78,6 @@ local function selectRow(row)
     end
     S.compactDetail=true
     S.Select(record)
-end
-local function disabled(parent, text, x, y, width, help)
-    local button=P.Button(parent,text,width,34)
-    button:SetPoint("TOPLEFT",x,y); P.SetEnabled(button,false)
-    P.Tooltip(button, help or "Unavailable in UI Preview / Sample data")
-    return button
 end
 local function colorName(label,record,whiteRosterName,verifiedClass)
     label:SetTextColor(P.NameColor(record,whiteRosterName,verifiedClass))
@@ -206,11 +200,11 @@ local function renderRecord(record, resetScroll)
         d.nameView:SetVerticalScroll(0); d.reasonView:SetVerticalScroll(0); d.noteView:SetVerticalScroll(0)
     end
     local guild,blacklist=guildPage(),blacklistPage()
-    P.SetEnabled(S.editButton,not guild and record~=nil and (not P.manual or P.manual.store~=nil))
+    P.SetEnabled(S.editButton,not guild and record~=nil and P.manual.store~=nil)
     S.editButton:SetShown(not guild)
     local draft=record and record.identityState=="unresolved"
-    S.checkStatus:SetShown(not blacklist and (not P.manual or record~=nil))
-    if P.manual then
+    S.checkStatus:SetShown(not blacklist and record~=nil)
+    do
         P.SetEnabled(S.checkStatus,P.manual.store~=nil and record~=nil and record.membership=="friend" and not draft)
         S.checkStatus.icon:SetVertexColor(unpack(S.checkStatus:IsEnabled() and C.muted or C.disabled))
     end
@@ -219,7 +213,7 @@ local function renderRecord(record, resetScroll)
         S.moveButton:SetShown(not guild)
         S.moveButton.label:SetText(L(record and (record.membership=="friend" and "Blacklist" or "Make friend") or "Move"))
     end
-    local attemptWarning=P.manual and record and record.membership=="friend" and not draft and record.attemptWarning
+    local attemptWarning=record and record.membership=="friend" and not draft and record.attemptWarning
     d.attempt:SetTextColor(unpack(attemptWarning and C.warning or C.body))
     for _,field in ipairs({d.role,d.heading,d.current,d.attemptLabel,d.attempt}) do
         field:SetShown(not blacklist)
@@ -249,7 +243,7 @@ local function renderRecord(record, resetScroll)
     end
     if not record then
         rows.BindPresenceHover(d.statusHover,d.statusIcon,d.current,nil,nil)
-        d.name:SetText(L(P.manual and "Select a record" or "Select a sample record")); colorName(d.name,nil); d.meta:SetText(""); d.role:SetText(""); d.note:SetText(""); d.current:SetText(""); d.observation:SetText(""); d.attempt:SetText(""); d.icon:Hide(); d.statusIcon:Hide()
+        d.name:SetText(L("Select a record")); colorName(d.name,nil); d.meta:SetText(""); d.role:SetText(""); d.note:SetText(""); d.current:SetText(""); d.observation:SetText(""); d.attempt:SetText(""); d.icon:Hide(); d.statusIcon:Hide()
         if blacklist and not guild then renderBlacklistLastSeen(nil) end
     else
         local class=roster.DisplayClass(record,blacklist and not guild)
@@ -309,7 +303,7 @@ function S.Refresh(resetSelectionScroll)
     local personal=blacklist and not guild
     paintRevision=paintRevision+1
     local revision=paintRevision
-    local inviteContext=P.manual and S.section=="friend" and P.manual.invite.context()
+    local inviteContext=S.section=="friend" and P.manual.invite.context()
     local records,scope,status,peers,writeToken=S.records
     if guild then records,scope,status,peers,writeToken=guildRecords() end
     if revision~=paintRevision then return end
@@ -339,12 +333,12 @@ function S.Refresh(resetSelectionScroll)
         section=S.section, query=query, searchKey=searchKey, roleFilter=not blacklist and S.roleFilter,
         statusFilter=not blacklist and S.statusFilter, classFilter=S.classFilter,
         sortByName=true, descending=not S.sortByName,
-        favoritesFirst=P.manual and S.section=="friend", personalBlacklist=personal,
+        favoritesFirst=S.section=="friend", personalBlacklist=personal,
     })
     local anyBlacklist=S.section=="blacklist" or guild
     S.pageTitle:SetText(L(guild and "Guild Blacklist" or personal and "Personal Blacklist" or anyBlacklist and "Blacklist" or "Friends"))
-    S.addButton.label:SetText(L(anyBlacklist and (P.manual and "Add entry" or "Add sample") or "Add friend"))
-    if P.manual then S.addButton:SetSize(math.max(112,math.ceil(S.addButton.label:GetUnboundedStringWidth())+45),34) end
+    S.addButton.label:SetText(L(anyBlacklist and "Add entry" or "Add friend"))
+    S.addButton:SetSize(math.max(112,math.ceil(S.addButton.label:GetUnboundedStringWidth())+45),34)
     if S.guildPeers then
         local showPeers=guild and scope~=nil
         if S.guildPeers:IsShown()~=showPeers then S.facetLayoutDirty=true end
@@ -352,7 +346,7 @@ function S.Refresh(resetSelectionScroll)
         S.guildPeers:SetShown(showPeers)
     end
     local active=not guild and S.RefreshFilterMenu(blacklist) or 0
-    local inline=P.manual and (S.section=="friend" or S.section=="blacklist")
+    local inline=S.section=="friend" or S.section=="blacklist"
     for key,link in pairs(S.facetLinks or {}) do
         link:SetShown(inline and (S.section=="friend" or key=="classFilter") or false)
     end
@@ -398,7 +392,7 @@ function S.Refresh(resetSelectionScroll)
     local total=#S.filtered
     if (compactCount or guild) and total>visibleRows then
         S.count:SetText(L("%d–%d of %d",S.offset+1,math.min(S.offset+visibleRows,total),total))
-    elseif P.manual and S.section=="friend" then
+    elseif S.section=="friend" then
         local all=0
         for _,record in ipairs(records) do if record.membership=="friend" then all=all+1 end end
         S.count:SetText(L(all==1 and "%d of %d friend" or "%d of %d friends",total,all))
@@ -407,7 +401,7 @@ function S.Refresh(resetSelectionScroll)
     end
     local rosterPage=S.section=="friend" or S.section=="blacklist" or guild
     local noResults=total==0 and rosterPage
-    local empty=P.manual and "No matching records" or "No matching sample records"
+    local empty="No matching records"
     if guild then
         if status=="no_guild" then empty="You’re not in a guild. Guild sync is unavailable."
         elseif not scope then empty="Guild Blacklist is unavailable."
@@ -438,7 +432,7 @@ function S.Refresh(resetSelectionScroll)
     S.columnInvite:SetText(L(anyBlacklist and "Mute" or "Invite"))
     S.backButton.label:SetText(L(guild and "Back to list" or anyBlacklist and "Back to blacklist" or "Back to friends"))
     S.editButton.label:SetText(L(anyBlacklist and "Edit entry" or "Edit friend"))
-    if P.manual then
+    do
         S.editButton:SetWidth(math.ceil(S.editButton.label:GetUnboundedStringWidth())+44)
         S.moveButton:SetWidth(math.ceil(S.moveButton.label:GetUnboundedStringWidth())+26)
     end
@@ -449,7 +443,7 @@ function S.Refresh(resetSelectionScroll)
         button.label:SetTextColor(unpack(button.selected and C.text or C.body))
         P.SetPaletteTint(button.icon,button.selected and C.teal or C.muted)
     end
-    if P.manual and S.editor then S.editor.RefreshNameColor() end
+    if S.editor then S.editor.RefreshNameColor() end
 end
 function S.SetSection(section)
     if S.scrim and S.scrim:IsShown() then return end
@@ -506,7 +500,7 @@ local function openEncounterBlacklist(row,ownsSelection)
 end
 local function createBatchRefreshControls(w,list)
     local help="Checks your group, guild, and Recent Allies. Check status can also try Who for an eligible Friend."
-    if P.manual then
+    do
         local batch=P.manual.batchRefresh
         S.refreshStatus=placeLabel(w,"",24,-689,"meta",C.warning)
         S.refreshStatus:SetWordWrap(false)
@@ -557,18 +551,13 @@ local function createBatchRefreshControls(w,list)
             if needsVisibleLayout or friendsChangedWhileHidden then S.Refresh() end
         end)
         w:HookScript("OnHide",S.UpdateBatchRefresh)
-    else
-        S.refreshLabel=P.Label(list,L("Manual refresh"),"small",C.muted)
-        S.refreshButton=disabled(list,"Refresh rosters",0,0,152,help.." Unavailable in UI Preview / Sample data")
     end
     P.ButtonIcon(S.refreshButton,"refresh")
 end
 local guildShareNotice
 function S.ResetFooter()
-    local width=S.window:GetWidth()
-    S.footer:SetText(P.manual and L(P.manual.error or "Manual checks use target, group, guild and Recent Allies.")
-        or (width<768 and "Sample data · Edits reset on reload. Live actions disabled." or "Sample data · Edits reset on reload. Invitations and status checks are disabled."))
-    S.footer:SetTextColor(unpack(P.manual and P.manual.error and C.warning or C.muted))
+    S.footer:SetText(L(P.manual.error or "Manual checks use target, group, guild and Recent Allies."))
+    S.footer:SetTextColor(unpack(P.manual.error and C.warning or C.muted))
     guildShareNotice=nil
 end
 local function showFooter(message)
@@ -731,18 +720,13 @@ local function saveGuildBlacklist(name,reasons,sharedNote,scope,alsoPersonal,not
 end
 function S.Create()
     if S.window then return end
-    S.records = P.manual and P.manual.records or P.NewFixtures(); local classEvidence={}; S.pageFilters={}; S.section = "friend"; S.offset = 0; S.sortByName=true; S.rows = {}; S.nav = {}
-    if not P.manual then
-        for _, record in ipairs(S.records) do
-            if record.class and record.evidenceName then classEvidence[record.evidenceName]={class=record.class,level=record.level} end
-        end
-    end
+    S.records = P.manual.records; S.pageFilters={}; S.section = "friend"; S.offset = 0; S.sortByName=true; S.rows = {}; S.nav = {}
     local w = CreateFrame("Frame", "WhowhoPreviewWindow", UIParent)
     S.window = w; w:SetSize(D.windowWidth,D.windowHeight); w:SetPoint("CENTER"); w:SetFrameStrata("DIALOG"); w:SetToplevel(true); w:SetMovable(true); w:SetClampedToScreen(true); w:EnableMouse(true); w:RegisterForDrag("LeftButton")
     w:SetScript("OnDragStart", function(self) self:StartMoving() end)
     w:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); local point, _, relativePoint, x, y = self:GetPoint(); P.db.position={point=point, relativePoint=relativePoint, x=x, y=y} end)
     w:SetScript("OnMouseDown", function(self) self:Raise() end)
-    if P.manual then
+    do
         local ageElapsed=0
         w:HookScript("OnUpdate",function(_,elapsed)
             ageElapsed=ageElapsed+elapsed
@@ -770,7 +754,7 @@ function S.Create()
     P.SetPaletteFill(railTint,C.railTint)
     P.PaneEdge(nav,"RIGHT")
     local sections={{"friend","Friends","friends"},{"blacklist","Blacklist","blacklist"},{"encounters","Encounters","encounters"},{"settings","Settings","settings"}}
-    if P.manual then table.insert(sections,3,{"guildBlacklist","Guild Blacklist","blacklist","Guild\nBlacklist"}) end
+    table.insert(sections,3,{"guildBlacklist","Guild Blacklist","blacklist","Guild\nBlacklist"})
     for i,item in ipairs(sections) do
         local button=P.Button(nav,L(item[2]),140,38,function() S.SetSection(item[1]) end,"nav")
         button.caption=item[2]; button.compactCaption=item[4]
@@ -781,7 +765,7 @@ function S.Create()
     S.rosterHeader=P.PageHeader(list,65)
     S.pageTitle=placeLabel(list,"Friends",24,-23,"page",C.text)
     S.count=P.Label(list,"","small",C.muted); S.count:SetHeight(34); S.count:SetJustifyV("MIDDLE"); S.count:SetWordWrap(false)
-    if P.manual then
+    do
         S.guildPeers=placeLabel(list,"",24,-64,"meta",C.muted)
         S.guildPeers:Hide()
     end
@@ -801,7 +785,7 @@ function S.Create()
     P.Tooltip(S.searchClear,L("Clear search")); S.searchClear:Hide()
     S.searchBox:HookScript("OnEditFocusGained",function() S.searchLabel:Hide() end)
     S.searchBox:HookScript("OnEditFocusLost",function(self) S.searchLabel:SetShown(fieldText(self)=="") end)
-    S.addButton=P.Button(list,L("Add friend"),136,P.manual and 34 or 36,function(self)
+    S.addButton=P.Button(list,L("Add friend"),136,34,function(self)
         if not self:IsVisible() or rosterPointerBlocked() then return end
         if guildPage() then
             local expected,revision=guildWriteToken,paintRevision
@@ -813,7 +797,7 @@ function S.Create()
             end
             return
         end
-        if P.manual and S.section=="blacklist" then
+        if S.section=="blacklist" then
             local A = P.manual
             local store,region=A.store,A.region
             local name,guid=A.playerAddIdentity("target",store,region)
@@ -825,7 +809,7 @@ function S.Create()
         S.editor.Open(nil,S.section,fieldText(S.searchBox),#S.filtered==0)
     end,"Primary"); S.addButton:SetPoint("TOPRIGHT",-24,-25); P.ButtonIcon(S.addButton,"plus")
     P.CreateRosterFilters(list,S)
-    S.emptyLabel=placeLabel(list,P.manual and "No matching records" or "No matching sample records",40,-175,"body",C.muted)
+    S.emptyLabel=placeLabel(list,"No matching records",40,-175,"body",C.muted)
     S.clearSearch=P.Button(list,L("Clear search"),120,30,function() S.searchBox:SetText("") end); S.clearSearch:SetPoint("TOPLEFT",40,-205)
     S.sortButton=P.Button(list,L("Character · A–Z"),190,30,function()
         if S.scrim:IsShown() or S.filterMenu:IsShown() then return end
@@ -842,9 +826,9 @@ function S.Create()
     S.columnPresence=placeLabel(list,"Presence",369,-123,"column",C.muted)
     S.columnCopy=P.Label(list,L("Copy"),"column",C.muted); S.columnCopy:SetPoint("TOP",list,"TOPRIGHT",-87,-123)
     S.columnInvite=P.Label(list,L("Invite"),"column",C.muted); S.columnInvite:SetPoint("TOP",list,"TOPRIGHT",-43,-123)
-    if P.manual then S.columnCopy:Hide(); S.columnInvite:Hide() end
+    S.columnCopy:Hide(); S.columnInvite:Hide()
     S.rosterRule=P.Rule(list,24,149,24); P.Rule(list,24,556,24)
-    if P.manual then
+    do
         S.favoriteHeading=P.Label(list,L("Favorites"),"section",C.gold)
         S.otherFriendsHeading=P.Label(list,L("Other Friends"),"section",C.muted)
         S.favoriteHeading:Hide(); S.otherFriendsHeading:Hide()
@@ -854,7 +838,7 @@ function S.Create()
         favorite=favoriteRosterRow, inviteOrMute=inviteOrMuteRosterRow, delete=deleteRosterRow,
     })
     list:EnableMouseWheel(true); list:SetScript("OnMouseWheel",function(_, delta) if not rosterPointerBlocked() then S.offset=S.offset-delta; S.Refresh() end end)
-    S.footer=placeLabel(w,"Sample edits reset on reload. Invitations and status checks are disabled.",24,-689,"meta",C.muted)
+    S.footer=placeLabel(w,"",24,-689,"meta",C.muted)
     createBatchRefreshControls(w,list)
     local details=CreateFrame("Frame",nil,w); S.details=details; details:SetPoint("TOPLEFT",D.windowWidth-D.wideDetailWidth,-D.headerHeight); details:SetSize(D.wideDetailWidth,D.paneHeight); S.detailsPaper=P.Material(details,"Paper"); S.blacklistDetailsBackground=P.Paint(details,C.raised)
     S.blacklistDetailsBackground:Hide(); P.PaneEdge(details,"LEFT")
@@ -866,17 +850,17 @@ function S.Create()
     d.noteEdge,d.noteFill=P.NoteInset(details)
     d.nameView,d.name=readable(details,"record",C.text)
     d.meta=placeLabel(details,"",25,-64,"body",C.body)
-    if P.manual then
+    do
         d.affiliation=placeLabel(details,"",25,-88,"small",C.muted)
         d.affiliation:Hide()
         d.factionLabel=placeLabel(details,"Faction",25,0,"small",C.muted); d.factionLabel:Hide()
     end
     d.role=P.Label(details,"","body",C.body); d.role:SetHeight(24); d.role:SetPoint("LEFT",d.meta,"RIGHT",32,0); d.role:SetJustifyH("LEFT")
     d.icon=P.RoleIcon(details,d.role,18,4)
-    d.reasonLabel=placeLabel(details,"Reasons",25,0,P.manual and "small" or "section",P.manual and C.muted or C.text)
+    d.reasonLabel=placeLabel(details,"Reasons",25,0,"small",C.muted)
     d.reasonView,d.reasons=readable(details,"body",C.body)
     d.noteView,d.note=readable(details,"body",C.body)
-    if P.manual then
+    do
         local bar=CreateFrame("Slider",nil,details)
         bar:SetOrientation("VERTICAL"); bar:SetWidth(12)
         bar:SetThumbTexture("Interface\\Buttons\\WHITE8X8")
@@ -884,25 +868,25 @@ function S.Create()
         bar:SetScript("OnValueChanged",function(_,value) d.noteView:SetVerticalScroll(value) end)
         bar:Hide(); d.noteView.scrollbar=bar
     end
-    d.heading=placeLabel(details,"Presence",25,-177,P.manual and "small" or "section",P.manual and C.muted or C.text)
+    d.heading=placeLabel(details,"Presence",25,-177,"small",C.muted)
     d.statusIcon=P.Glyph(details,"unknown",20,C.muted); d.statusIcon:Hide()
-    if P.manual then
+    do
         d.statusHover=CreateFrame("Frame",nil,details); d.statusHover:SetSize(28,28); d.statusHover:SetPoint("CENTER",d.statusIcon,"CENTER"); d.statusHover:EnableMouse(true)
         d.statusHover:SetScript("OnEnter",function(self) local hint=S.selected and rows.PresenceHint(S.selected); if hint and not rosterPointerBlocked() then P.ShowTooltip(self,hint) end end)
         d.statusHover:SetScript("OnLeave",function(self) P.HideTooltip(self) end)
     end
-    d.current=placeLabel(details,"",49,-215,P.manual and "body" or "presence",C.body)
+    d.current=placeLabel(details,"",49,-215,"body",C.body)
     d.current:SetHeight(24); d.current:SetJustifyV("MIDDLE")
     d.statusIcon:SetPoint("RIGHT",d.current,"LEFT",-4,0)
     d.observationLabel=placeLabel(details,"Last seen",25,-248,"small",C.muted)
     d.observation=placeLabel(details,"",116,-247,"body",C.body)
     d.attemptLabel=placeLabel(details,"Last check",25,-274,"small",C.muted)
     d.attempt=placeLabel(details,"",116,-273,"body",C.body)
-    d.noteLabel=placeLabel(details,"Personal note",25,-336,P.manual and "small" or "section",P.manual and C.muted or C.text)
+    d.noteLabel=placeLabel(details,"Personal note",25,-336,"small",C.muted)
     d.rule1=P.Rule(details,25,160,25); d.rule2=P.Rule(details,25,319,25)
     S.editButton=P.Button(details,L("Edit friend"),126,34,function() if S.selected and not guildPage() and not rosterPointerBlocked() then S.editor.Open(S.selected,S.section,fieldText(S.searchBox),#S.filtered==0) end end)
     S.editButton:SetPoint("BOTTOMLEFT",25,23); P.ButtonIcon(S.editButton,"edit")
-    if P.manual then
+    do
         S.moveButton=P.Button(details,L("Move"),112,34,function()
             if not S.selected or guildPage() or rosterPointerBlocked() then return end
             if S.selected.membership=="friend" then S.editor.Open(S.selected,"blacklist",fieldText(S.searchBox),false,true); return end
@@ -913,7 +897,7 @@ function S.Create()
         S.moveButton:SetPoint("BOTTOMRIGHT",-25,23)
         P.SetEnabled(S.addButton,P.manual.store~=nil)
     end
-    if P.manual then
+    do
         S.checkStatus=P.Button(details,L("Check status"),32,32,function()
             local record=S.selected
             if not record or record.membership~="friend" then return end
@@ -933,23 +917,15 @@ function S.Create()
             end
         end)
         S.checkStatus:HookScript("OnLeave",function(self) P.HideTooltip(self) end)
-    else
-        S.checkStatus=disabled(details,"Check status",0,0,132)
-        S.checkStatus:SetHeight(32)
-        P.ButtonIcon(S.checkStatus,"refresh")
     end
-    if P.manual then
+    do
         P.RoundButton(S.addButton,true)
         P.RoundButton(S.refreshButton)
         P.RoundButton(S.editButton)
         P.RoundButton(S.moveButton)
     end
     S.settings=P.CreateSettings(w,S)
-    if P.manual then
-        S.encounters=P.CreateEncounterLedger(w,openEncounterBlacklist,rosterPointerBlocked)
-    else
-        S.encounters=P.CreateEncounters(w,S.records)
-    end
+    S.encounters=P.CreateEncounterLedger(w,openEncounterBlacklist,rosterPointerBlocked)
     S.scrim=CreateFrame("Frame",nil,w)
     S.scrim:SetAllPoints(w)
     -- Keep the scrim above the filter menu's child choices as well as its triggers.
@@ -966,7 +942,7 @@ function S.Create()
     placeLabel(S.copyDialog,"Press Ctrl+C to copy the selected name.",24,-111,"small",C.muted)
     S.copyDialog:SetScript("OnShow",function() P.ClearTooltip(); S.filterMenu:Hide(); S.scrim:Show() end)
     S.copyDialog:SetScript("OnHide",function() S.copyBox:ClearFocus(); if not S.editor or not S.editor.IsShown() then S.scrim:Hide() end end); S.copyBox:SetScript("OnEscapePressed",function() S.copyDialog:Hide() end); S.copyBox:SetScript("OnEnterPressed",function() S.copyDialog:Hide() end)
-    if P.manual then
+    do
         S.deleteDialog=P.CreateDialog(w,"WhowhoPreviewDeleteDialog",S.scrim); S.deleteDialog:SetSize(384,160)
         S.deleteHeading=P.Label(S.deleteDialog,L("Are you sure to delete?"),"record",C.text); P.FontSize(S.deleteHeading,16); S.deleteHeading:SetPoint("TOP",0,-14); S.deleteHeading:SetSize(284,24); S.deleteHeading:SetJustifyH("CENTER")
         S.deleteMessage=P.Label(S.deleteDialog,"","record",C.text); S.deleteMessage:SetPoint("TOP",0,-52); S.deleteMessage:SetSize(336,48); S.deleteMessage:SetJustifyH("CENTER"); S.deleteMessage:SetJustifyV("MIDDLE"); S.deleteMessage:SetWordWrap(true); S.deleteMessage:SetNonSpaceWrap(true)
@@ -987,11 +963,11 @@ function S.Create()
         local close=P.Button(S.deleteDialog,"",34,34,function() S.deleteDialog:Hide() end,"action"); close:SetPoint("TOPRIGHT",-10,-10); P.ButtonIcon(close,"close",20)
     end
     local copyClose=P.Button(S.copyDialog,L("Close"),100,30,function() S.copyDialog:Hide() end); copyClose:SetPoint("BOTTOMRIGHT",-24,12)
-    if P.manual then P.RoundButton(copyClose) end
+    P.RoundButton(copyClose)
     S.editor=P.EditorDialog.Create(w,{
         backdrop=S.scrim,
-        records=S.records, classEvidence=classEvidence, save=P.manual and P.manual.save,
-        saveGuild=P.manual and saveGuildBlacklist,
+        records=S.records, save=P.manual.save,
+        saveGuild=saveGuildBlacklist,
         onShow=function()
             if guildShareNotice and S.footer:GetText()==guildShareNotice then S.ResetFooter() end
             P.ClearTooltip(); S.filterMenu:Hide(); S.scrim:Show()
@@ -1020,9 +996,9 @@ function S.Open()
     S.Create()
     local reopening=not S.window:IsShown()
     S.window:Show(); S.window:Raise()
-    if P.manual then refreshAgedRecords() end
-    if P.manual then S.RefreshBlacklistMetadata(); S.RefreshBlacklistLastSeen() end
-    if P.manual and S.section=="encounters" then S.encounters:Refresh() end
+    refreshAgedRecords()
+    S.RefreshBlacklistMetadata(); S.RefreshBlacklistLastSeen()
+    if S.section=="encounters" then S.encounters:Refresh() end
     S.RefreshGuildBlacklist()
     if reopening then requestGuildSync() end
 end

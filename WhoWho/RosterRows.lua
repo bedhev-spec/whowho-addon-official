@@ -89,7 +89,7 @@ end
 
 function R.Bind(row,record,section,selectedId,actionAvailable,inviteIssue,chatMuted)
     local guild=section=="guildBlacklist"
-    local personal=P.manual and section=="blacklist"
+    local personal=section=="blacklist"
     local blacklist=personal or guild
     local previous=row.record
     if row.section~=section or not sameOwner(previous,record,guild) then
@@ -104,11 +104,11 @@ function R.Bind(row,record,section,selectedId,actionAvailable,inviteIssue,chatMu
         row.chatMuted=chatMuted
         P.SetEnabled(row.inviteButton,actionAvailable)
         row.muteIcon:SetVertexColor(unpack(actionAvailable and C.body or C.disabled))
-    elseif P.manual and section=="friend" then
+    elseif section=="friend" then
         row.inviteIssue=inviteIssue
         P.SetEnabled(row.inviteButton,actionAvailable)
         row.inviteIcon:SetVertexColor(unpack(actionAvailable and C.body or C.disabled))
-    elseif P.manual then
+    else
         row.inviteButton:Disable()
     end
     if row.muteSlash then row.muteSlash:SetShown(personal and row.chatMuted==true or false) end
@@ -130,10 +130,10 @@ function R.Bind(row,record,section,selectedId,actionAvailable,inviteIssue,chatMu
     if record then
         row.copyButton:SetEnabled(record.identityState~="unresolved")
         row.selected=record.id==selectedId
-        row.selectedColor=P.manual and C.friendSelected or nil
+        row.selectedColor=C.friendSelected
         P.UpdateButton(row)
-        row.leadingEdge:SetShown(P.manual~=nil and row.selected)
-        P.SetPaletteFill(row.rule,not P.manual and row.selected and C.selectedRule or C.rowRule)
+        row.leadingEdge:SetShown(row.selected)
+        P.SetPaletteFill(row.rule,C.rowRule)
         row.name:SetText(guild and displayText(record.fullName) or record.fullName)
         if blacklist then
             row.name:SetTextColor(P.NameColor(personal and record or nil,true,roster.DisplayClass(record,personal)))
@@ -202,7 +202,7 @@ local function createRow(parent,actions)
         caption:SetHeight(24); caption:SetJustifyH("LEFT"); caption:SetJustifyV("MIDDLE"); caption:SetWordWrap(false)
     end
     row.statusIcon=P.Glyph(row,"unknown",20,C.muted)
-    if P.manual then
+    do
         row.favoriteButton=P.Button(row,"",34,34,nil,"action")
         bindClick(row,row.favoriteButton,actions.favorite)
         row.favoriteButton:SetPoint("TOPLEFT",6,-4)
@@ -233,7 +233,7 @@ local function createRow(parent,actions)
     end)
     row.copyButton:HookScript("OnLeave",function(self) P.HideTooltip(self) end)
     row.inviteButton=P.Button(row,"",34,34,nil,"action"); row.inviteButton:SetPoint("RIGHT",-8,0); row.inviteButton:Disable()
-    if P.manual then
+    do
         bindClick(row,row.inviteButton,actions.inviteOrMute)
         row.inviteButton:HookScript("OnHide",function() invalidateRowBinding(row) end)
         row.inviteButton:ClearAllPoints(); row.inviteButton:SetPoint("RIGHT",-80,0)
@@ -246,7 +246,7 @@ local function createRow(parent,actions)
     end
     row.inviteIcon=P.ActionGlyph(row.inviteButton,"plus",20,C.disabled); row.inviteIcon:SetPoint("CENTER",row.inviteButton,"CENTER",0,0)
     row.muteIcon=P.ActionGlyph(row.inviteButton,"mute",18,C.disabled); row.muteIcon:SetPoint("CENTER",row.inviteButton,"CENTER",0,0)
-    if P.manual then
+    do
         row.muteSlash=row.inviteButton:CreateLine(nil,"OVERLAY")
         row.muteSlash:SetStartPoint("CENTER",row.inviteButton,-6,-6)
         row.muteSlash:SetEndPoint("CENTER",row.inviteButton,6,6)
@@ -256,17 +256,14 @@ local function createRow(parent,actions)
     end
     row.inviteButton:HookScript("OnEnter",function(self)
         if not row.record or actions.blocked() then return end
-        if P.manual and row.section=="friend" then
+        if row.section=="friend" then
             P.ShowTooltip(self,row.inviteIssue and L(row.inviteIssue) or L("Invite %s",row.record.fullName))
-        elseif P.manual then
+        else
             local caption="Chat muting unavailable for %s"
             if self:IsEnabled() then
                 caption=row.chatMuted and "Chat muted · Unmute %s" or "Mute chat from %s"
             end
             P.ShowTooltip(self,L(caption,row.record.fullName))
-        else
-            P.ShowTooltip(self,(row.section=="blacklist" and "Mute chat" or "Invite") .. " unavailable for "
-                .. row.record.fullName .. " in UI Preview")
         end
     end)
     row.inviteButton:HookScript("OnLeave",function(self) P.HideTooltip(self) end)

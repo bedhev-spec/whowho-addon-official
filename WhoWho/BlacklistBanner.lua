@@ -120,7 +120,7 @@ local function arrange(frame,owns)
 end
 
 local function readable(value)
-    return not P.manual or P.manual.nativeRead.readable(value)
+    return P.manual.nativeRead.readable(value)
 end
 
 local function center(frame)
@@ -130,7 +130,7 @@ end
 
 local function dragAllowed()
     local A=P.manual
-    return not A or A.nativeRead.read(InCombatLockdown)==false
+    return A.nativeRead.read(InCombatLockdown)==false
 end
 
 local function stopDrag(frame, save)
@@ -242,7 +242,7 @@ end
 local function installEncounterClick(frame)
     local A=P.manual
     frame:EnableMouse(false)
-    if not A or A.nativeRead.read(frame.RegisterEvent,frame,"MODIFIER_STATE_CHANGED")~=true then return end
+    if A.nativeRead.read(frame.RegisterEvent,frame,"MODIFIER_STATE_CHANGED")~=true then return end
     local read=A.nativeRead.read
     local encounter, pressed, enabled, binding=nil,nil,false,0
     local function sync()
@@ -362,7 +362,7 @@ function B.toggleTest()
     if B.testShown() then B.hideTest(); return end
     openingTest=true
     local A=P.manual
-    local faction=A and A.playerFaction(A.region)
+    local faction=A.playerFaction(A.region)
     local name=faction and factionSample[faction] or sampleName
     if not test then test=frameForTest(true) end
     if dragAllowed() and not test.dragReady then
@@ -379,7 +379,7 @@ function B.toggleTest()
     test:Show()
     openingTest=false
     testChanged()
-    if A then A.alertSound.playBanner(ownsAppearance) end
+    A.alertSound.playBanner(ownsAppearance)
 end
 
 function B.showLive(name,reasons,encounter)
