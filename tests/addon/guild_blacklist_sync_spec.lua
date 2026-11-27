@@ -1613,7 +1613,7 @@ end
 do
     local b=bus()
     local shared={version=1,scopes={}}
-    for club=1,32 do shared.scopes["3:"..(500+club)]={} end
+    for club=1,64 do shared.scopes["3:"..(500+club)]={} end
     local a=b:client("Scope Limited",{shared=shared})
     event(a,"X|3:101|12800,1,Valid Name")
     check(not shared.scopes["3:101"] and not shared.removed,"removals cannot exceed the scope limit")
@@ -2190,7 +2190,7 @@ end
 do
     local b=bus()
     local db={version=1,scopes={},members={[ME]="3:101"}}
-    for club=101,132 do db.scopes["3:"..club]={} end
+    for club=101,164 do db.scopes["3:"..club]={} end
     local a=b:client("Scope Slot",{shared=db})
     b:advance(2)
     guildEvent(a,202)
@@ -2202,7 +2202,7 @@ end
 -- At the cap, only a list no recorded character points to makes room: fewest entries first.
 local function fullCache(members)
     local db={version=1,scopes={},removed={["3:117"]={["Gone Subject"]={rev=12799,gone=true}}},members=members}
-    for club=101,132 do db.scopes["3:"..club]={["Listed Subject"]={rev=0},["Other Subject"]={rev=0}} end
+    for club=101,164 do db.scopes["3:"..club]={["Listed Subject"]={rev=0},["Other Subject"]={rev=0}} end
     db.scopes["3:117"]={["Listed Subject"]={rev=0}}
     db.scopes["3:101"]={}
     return db
@@ -2217,11 +2217,11 @@ do
     local b=bus()
     local db=fullCache({["3:Other Alt"]="3:101"})
     local a=b:client("Full Cache",{shared=db,guild=202})
-    check(a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared" and db.scopes["3:202"] and scopes(db)==32,
+    check(a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared" and db.scopes["3:202"] and scopes(db)==64,
         "a full cache makes room for a new guild")
     check(db.scopes["3:101"] and db.scopes["3:117"]==nil and db.removed["3:117"]==nil and db.scopes["3:102"],
         "the claimed list stays and the smallest unclaimed list goes with its removals")
-    check(a.g.add("Second Subject",{"spam"},nil,(a.g.context()))=="shared" and scopes(db)==32 and db.scopes["3:102"],
+    check(a.g.add("Second Subject",{"spam"},nil,(a.g.context()))=="shared" and scopes(db)==64 and db.scopes["3:102"],
         "a saved list erases nothing more")
     a.online=false
     local again=b:client("Full Cache",{shared=db,guild=202})
@@ -2231,11 +2231,11 @@ end
 do
     local b=bus()
     local members={}
-    for club=101,132 do members["3:Alt "..string.char(65+(club-101)%26)..(club<127 and "a" or "b")]="3:"..club end
+    for club=101,164 do members["3:Alt "..string.char(65+club%26,97+math.floor(club/26))]="3:"..club end
     local db=fullCache(members)
     local a=b:client("Claimed Cache",{shared=db,guild=202})
     check(a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="limit" and db.scopes["3:202"]==nil
-        and db.scopes["3:117"] and scopes(db)==32,"a fully claimed cache erases nothing")
+        and db.scopes["3:117"] and scopes(db)==64,"a fully claimed cache erases nothing")
 end
 
 do
@@ -2243,11 +2243,22 @@ do
     local db=fullCache()
     local a=b:client("Removal First",{shared=db,guild=202})
     event(a,"X|3:202|12800,1,Gone Person")
-    check(db.scopes["3:202"]==nil and db.scopes["3:117"] and scopes(db)==32,"a removal alone erases no list")
+    check(db.scopes["3:202"]==nil and db.scopes["3:117"] and scopes(db)==64,"a removal alone erases no list")
     event(a,"E|3:202|,0,Kept Person")
     event(a,"E|3:202|,0,Gone Person")
     check(db.scopes["3:202"] and db.removed["3:202"]["Gone Person"] and not rows(a)["Gone Person"] and rows(a)["Kept Person"],
         "a removal received before the list is saved still holds")
+end
+
+do
+    local b=bus()
+    local db={version=1,scopes={}}
+    for club=101,132 do db.scopes["3:"..club]={["Listed Subject"]={rev=0}} end
+    local a=b:client("Upgraded Save",{shared=db,guild=202})
+    check(a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared","a 32 list save has room after the upgrade")
+    local count=0
+    for _ in pairs(db.scopes) do count=count+1 end
+    check(count==33,"upgrading erases no saved list")
 end
 
 -- The count line follows each new guildmate while the sample is still collecting.

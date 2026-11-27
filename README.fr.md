@@ -20,7 +20,7 @@ Tout membre de la guilde disposant d’une version à jour de WhoWho peut suppri
 
 Quand votre personnage quitte une guilde, WhoWho efface la liste noire de guilde enregistrée pour celle-ci, y compris l’historique des suppressions, sauf si un autre de vos personnages la conserve. Rejoindre une autre guilde en jeu l’efface aussitôt. Sinon, cela prend environ une minute, ou se produit la prochaine fois que vous jouez ce personnage. Seules les guildes où ce personnage a été vu avec cette version sont concernées. Un autre de vos personnages ne conserve la liste que si vous l’avez joué dans cette guilde avec cette version, assez longtemps pour que WhoWho le repère alors que la liste de la guilde était enregistrée. Un personnage que vous n’avez pas joué depuis la mise à jour, comme un personnage banque, ne compte pas. Les membres de la guilde ne sont pas affectés.
 
-WhoWho enregistre au plus 32 listes de guilde. Quand une nouvelle guilde a besoin de place, il efface une liste qu’aucun de vos personnages repérés ne conserve, y compris l’historique des suppressions, en commençant par celle qui a le moins d’entrées. Si toutes les listes sont conservées, WhoWho ne peut pas enregistrer de liste pour la nouvelle guilde.
+WhoWho enregistre au plus 64 listes de guilde. Quand une nouvelle guilde a besoin de place, il efface une liste qu’aucun de vos personnages repérés ne conserve, y compris l’historique des suppressions, en commençant par celle qui a le moins d’entrées. Si toutes les listes sont conservées, WhoWho ne peut pas enregistrer de liste pour la nouvelle guilde. Au-delà de 32 listes enregistrées, les anciennes versions de WhoWho ne peuvent plus charger la liste noire de guilde.
 
 ### Ajout rapide
 

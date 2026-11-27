@@ -20,7 +20,7 @@ Any guild member with an up-to-date WhoWho can delete a Guild Blacklist entry, a
 
 When your character leaves a guild, WhoWho erases the Guild Blacklist saved for it, including its deletion history, unless another of your characters keeps it. Joining another guild while playing erases it at once. Otherwise it takes about a minute, or happens the next time you play that character. Only guilds that character was seen in with this version are covered. Another of your characters keeps the list only if you have played it in that guild with this version, long enough for WhoWho to notice it while the guild's list was saved. A character you have not played since upgrading, such as a bank alt, does not count. Guildmates are not affected.
 
-WhoWho saves at most 32 guild lists. When a new guild needs room, it erases one list that none of your recorded characters keeps, including its deletion history, starting with the one with the fewest entries. If every list is kept, WhoWho cannot save a list for the new guild.
+WhoWho saves at most 64 guild lists. When a new guild needs room, it erases one list that none of your recorded characters keeps, including its deletion history, starting with the one with the fewest entries. If every list is kept, WhoWho cannot save a list for the new guild. Once more than 32 lists are saved, older versions of WhoWho cannot load the Guild Blacklist.
 
 ### Quick Add
 
