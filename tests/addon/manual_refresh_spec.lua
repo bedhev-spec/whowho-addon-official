@@ -421,7 +421,12 @@ do
     for _,map in ipairs(maps) do assert(map[id]) end
     assert(A.save(A.store.get(id),"blacklist","Person1 North","",nil,{"other"},true))
     for _,map in ipairs(maps) do assert(map[id]) end
+    local kept={}
+    for index,map in ipairs(maps) do kept[index]=map[id] end
     assert(A.move(A.store.get(id)))
+    -- A returning Friend starts without check data from before the move.
+    for _,map in ipairs(maps) do assert(map[id]==nil) end
+    for index,map in ipairs(maps) do map[id]=kept[index] end
     local apply=check.apply
     local cleared
     check.apply=function(item,at)

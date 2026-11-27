@@ -242,6 +242,11 @@ local function commit(candidate,record,transition,beforePublish)
         return nil,"Address book changed; try again."
     end
     if transition=="move" or transition=="blacklistEdit" then A.whoLookup.forget(record.id) end
+    -- A returning Friend must not show check data from before it left.
+    if transition=="move" and record.membership=="friend" then
+        A.targetCheck.forget(record.id)
+        A.relogRefresh.forget(record.id)
+    end
     publish(candidate)
     for _, item in ipairs(A.records) do if item.id == record.id then return item end end
 end
