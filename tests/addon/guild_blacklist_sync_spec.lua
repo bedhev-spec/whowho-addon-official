@@ -1912,11 +1912,63 @@ do
     check(erased(quietDB),"a guild change with no event erases after a minute")
 
     local late,stale,staleDB=recorded()
-    guildEvent(stale,101)
+    stale.inGuild=true
+    guildEvent(stale,nil)
     late:advance(61)
-    stale.guild=202
+    stale.inGuild,stale.guild=nil,202
     stale.g.context()
-    check(kept(staleDB),"a change long after a guild event still waits a minute")
+    check(kept(staleDB),"the follow-up reading ends the immediate window")
+
+    local again,home,homeDB=recorded()
+    guildEvent(home,101)
+    again:advance(30)
+    home.guild=202
+    home.g.context()
+    check(kept(homeDB),"a settled reading of the recorded guild ends the immediate window")
+
+    local switch,online,onlineDB=recorded()
+    guildEvent(online,false)
+    switch:advance(5)
+    guildEvent(online,202)
+    switch:advance(0.8)
+    check(erased(onlineDB),"a leave then a join while playing erases the old list at once")
+end
+
+do
+    local b,a,db=recorded()
+    local login=relog(b,a,db,{guild=202})
+    login.s:event("PLAYER_GUILD_UPDATE","player")
+    b:advance(0.8)
+    check(kept(db),"a guild event at login does not trust one other guild reading")
+    b:advance(58)
+    check(kept(db),"the login mismatch keeps the list for a minute")
+    b:advance(2)
+    check(erased(db),"the login mismatch erases after a matching reading")
+
+    local world,c,cache=recorded()
+    c.s:event("PLAYER_LEAVING_WORLD")
+    c.guild=202
+    c.s:event("PLAYER_ENTERING_WORLD",false,false)
+    c.s:event("PLAYER_GUILD_UPDATE","player")
+    world:advance(0.8)
+    check(kept(cache),"a loading screen forgets that the recorded guild was read")
+    world:advance(62)
+    check(erased(cache),"the mismatch after a loading screen erases after a minute")
+
+    local first=bus()
+    local fresh=guildCache()
+    local d=first:client("Event Recorded",{shared=fresh})
+    -- Hold back send timers: their own readings would also close the window.
+    local after=d.e.C_Timer.After
+    d.e.C_Timer.After=function(delay,fn) if delay>=0.75 then after(delay,fn) end end
+    guildEvent(d,101)
+    first:advance(0.8)
+    d.guild=202
+    d.g.context()
+    check(kept(fresh) and member(fresh)=="3:101","the reading that first records a guild ends the window")
+    guildEvent(d,202)
+    first:advance(0.8)
+    check(erased(fresh),"the reading that first records a guild counts as read in it")
 end
 
 do
@@ -1930,19 +1982,21 @@ do
     end
     a.g.context()
     check(kept(db) and member(db)=="3:101","an event during the name read neither erases nor records")
+    b:advance(0.8)
+    check(erased(db),"the interrupted reading leaves the event to its own settlement")
 
     local fresh=guildCache()
     local c=b:client("Unrecorded Member",{shared=fresh})
-    b:advance(2)
     local read=c.e.UnitNameUnmodified
-    b.time=b.time+2
     c.e.UnitNameUnmodified=function()
         c.e.UnitNameUnmodified=read
-        c.s:event("PLAYER_GUILD_UPDATE","player")
+        guildEvent(c,303)
         return read()
     end
     c.g.context()
-    check(fresh.members==nil and kept(fresh),"an interrupted name read records nothing")
+    check(fresh.members==nil,"an interrupted name read records nothing")
+    b:advance(0.8)
+    check(member(fresh)=="3:303","the settlement of that event records the new guild")
 end
 
 do
@@ -1979,7 +2033,7 @@ for _, away in ipairs({false,202}) do
     a.guild=away
     b:advance(49)
     check(kept(db),"the old guild still read after the event keeps the list: "..tostring(away))
-    b:advance(away and 2 or 62)
+    b:advance(62)
     check(erased(db),"the follow-up reading finds a lagging leave: "..tostring(away))
 end
 
@@ -2000,19 +2054,43 @@ do
     b:advance(1)
     check(#timers==1 and timers[1]==59.25,"a recorded guild gets one follow-up reading a minute after the event")
 
-    local db={version=1,scopes={}}
+    local db=guildCache()
     local c=b:client("Unlisted Member",{shared=db,character="Unlisted Member",guild=404})
     b:advance(5)
     local none=longTimers(c)
     guildEvent(c,404)
     b:advance(1)
-    check(#none==0 and db.members==nil,"without a recorded guild no follow-up is scheduled")
-    event(c,"E|3:404|,0,Valid Name")
-    b:advance(5)
-    check(member(db,"3:Unlisted Member")=="3:404","setup: the later list is recorded")
+    check(#none==0 and member(db,"3:Unlisted Member")==nil,"without a recorded guild no follow-up is scheduled")
+    c.guild=303
+    c.g.context()
+    check(member(db,"3:Unlisted Member")==nil,"with no follow-up one later reading records nothing")
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(30)
+    a.s:event("PLAYER_LEAVING_WORLD")
+    b:advance(10)
+    a.s:event("PLAYER_ENTERING_WORLD",false,false)
+    b:advance(21)
+    check(kept(db),"a loading screen drops the pending leave timer")
+
+    local late,c,cache=recorded()
+    guildEvent(c,101)
+    late:advance(1)
+    c.s:event("PLAYER_LEAVING_WORLD")
+    c.s:event("PLAYER_ENTERING_WORLD",false,false)
     c.guild=202
     c.g.context()
-    check(db.scopes["3:404"],"with no follow-up the immediate erase window is already closed")
+    check(kept(cache),"one other guild reading after a loading screen keeps the list")
+
+    local relogged,d,saved=recorded()
+    local login=relog(relogged,d,saved,{guild=false})
+    relogged:advance(59)
+    login.guild=202
+    relogged:advance(2)
+    check(kept(saved),"a timer reading that differs from the first mismatch erases nothing")
 end
 
 do

@@ -23,7 +23,7 @@ local classes = {
 local installed, inWorld, registered, storageReady, chatRestricted
 local state, status, generation, eventVersion = nil, "unavailable", 0, 0
 local db, scopeCount, checking, settling, lastMembershipKey
-local sighting, guildEvent, leaving, due, lastCharacter
+local sighting, guildEvent, leaving, due, lastCharacter, homeRead
 local nextSend = 0
 local schedule, currentState
 
@@ -244,6 +244,12 @@ local function recordedGuild(character)
     if plain(members) then return validMember(character,members[character]) end
 end
 
+-- A guild event can meet a stale club ID, so only a guild already read this world session is left at once.
+-- Reading it again also ends the window: a later other club ID is then unproven.
+local function atHome(character, key)
+    homeRead,guildEvent=character.."="..key,nil
+end
+
 local function recordMember(seen)
     if not seen.confirmed or not db[seen.key] or recordedGuild(seen.character) then return end
     local members=WhowhoGuildBlacklistDB.members
@@ -254,7 +260,10 @@ local function recordMember(seen)
     local size=0
     for _ in pairs(members) do size=size+1 end
     -- shortcut: past the cap a new character is not recorded, so it cannot keep a list that another one leaves.
-    if size < MAX_MEMBERS or members[seen.character] ~= nil then members[seen.character]=seen.key end
+    if size < MAX_MEMBERS or members[seen.character] ~= nil then
+        members[seen.character]=seen.key
+        atHome(seen.character,seen.key)
+    end
 end
 
 local function publish(current)
@@ -417,10 +426,14 @@ local function track(found)
     local character, key=found.character, found.key
     lastCharacter=character
     local home=recordedGuild(character)
-    if home == key then leaving=nil end
+    if home == key then
+        leaving=nil
+        atHome(character,key)
+    end
     if home and home ~= key then
         -- One reading may be stale; only a settled guild event makes another guild conclusive.
-        if key and guildEvent or due and due.character == character and due.from == home and due.key == key then
+        if key and guildEvent and homeRead == character.."="..home
+            or due and due.character == character and due.from == home and due.key == key then
             leaving=nil
             eraseLeft(character,home)
         else
@@ -1238,7 +1251,7 @@ function G.install()
             settling=nil
             lastMembershipKey=nil
             chatRestricted=nil
-            guildEvent,sighting,leaving=nil,nil,nil
+            guildEvent,sighting,leaving,homeRead=nil,nil,nil,nil
         end
         eventVersion,scopeTries=eventVersion+1,0
         if checking and not inWorld then
