@@ -23,7 +23,7 @@ local function fresh(preferences,viewport,locale)
     local menu
     e.Menu={ModifyMenu=function(tag,handler) if tag=="MENU_UNIT_PLAYER" then menu=handler end end}
     s:event("ADDON_LOADED","WhoWho")
-    local state={scope="guild-a",status="ready",entries={},attempts={},guildAdds={},pulls=0}
+    local state={scope="guild-a",status="ready",entries={},attempts={},guildAdds={},removes={},pulls=0}
     local function context()
         return state.status=="ready" and (state.writeToken or state.scope) or nil,state.status,
             state.scope and "read:"..state.scope
@@ -33,7 +33,24 @@ local function fresh(preferences,viewport,locale)
         context=context,
         list=function() return state.entries end,
         peerCount=function(scope) if scope==state.scope then return state.peers end end,
-        requestSync=function() state.pulls=state.pulls+1 end,
+        requestSync=function()
+            state.pulls=state.pulls+1
+            if state.onSync then state.onSync() end
+        end,
+        remove=function(name,scope)
+            state.removes[#state.removes+1]={name=name,scope=scope}
+            if state.onRemove then state.onRemove() end
+            if state.removeResult then return state.removeResult end
+            if state.status~="ready" or scope~=(state.writeToken or state.scope) then return "unavailable" end
+            for i,entry in ipairs(state.entries) do
+                if entry.name==name then
+                    table.remove(state.entries,i)
+                    p.Shell.RefreshGuildBlacklist()
+                    return "removed"
+                end
+            end
+            return "missing"
+        end,
         add=function(name,reasons,note,scope)
             assert(state.status=="ready" and state.scope==scope)
             state.guildAdds[#state.guildAdds+1]={name=name,reasons=reasons,note=note,
@@ -430,7 +447,8 @@ do
     local guildRow=assert(visibleText(pane,"Élodie Brisevent")):GetParent()
     assert(guildRow.name.textColor[1]==.2 and visibleText(pane,"Lune Pâle").textColor[1]==p.colors.text[1])
     assert(not guildRow.copyButton:IsVisible() and not guildRow.inviteButton:IsVisible()
-        and not guildRow.deleteButton:IsVisible() and not guildRow.favoriteButton:IsVisible())
+        and guildRow.deleteButton:IsVisible() and guildRow.deleteButton:IsEnabled()
+        and not guildRow.favoriteButton:IsVisible())
     local search=S.searchBox
     assert(search:IsVisible())
     local details=S.details
@@ -952,6 +970,270 @@ do
     c.reasonOptions.other:Click()
     c.formSave:Click()
     assert(not c.form:IsShown())
+end
+
+-- Guild deletion: shared row button, always confirmed, scoped to the dialog's guild.
+do
+    local p,s,e,S,state=fresh({skipDeleteConfirmation=true})
+    local function reset()
+        state.entries={{name="Alpha|r Stone",class="MAGE"},{name="Bravo Stone"},{name="Delta Stone"}}
+        state.status,state.scope,state.removeResult,state.onRemove,state.onSync="ready","guild-a",nil,nil,nil
+        state.removes={}
+        S.deleteDialog:Hide()
+        S.RefreshGuildBlacklist()
+    end
+    S.nav.guildBlacklist:Click()
+    reset()
+    local row=S.rows[1]
+    local delete=row.deleteButton
+    assert(delete:IsVisible() and delete:IsEnabled())
+    assert(row.deleteGlyph.vertexColor[1]==p.colors.deleteGlyph[1])
+    s:fire(delete,"OnEnter")
+    assert(e.GameTooltip:IsShown() and e.GameTooltip:GetText()==p.L("Delete entry"))
+    s:fire(delete,"OnLeave")
+    local point,x=delete:GetPoint()
+    local nameX=select(2,row.name:GetPoint())
+    for _,field in ipairs({row.name,row.note}) do
+        assert(point=="RIGHT" and nameX+field:GetWidth()<row:GetWidth()+x-delete:GetWidth(),
+            "guild row text stops before the delete button")
+    end
+
+    S.Select(row.record)
+    local footer,pulls=S.footer:GetText(),state.pulls
+    delete:Click()
+    assert(S.deleteDialog:IsShown() and #state.removes==0,"guild deletion is confirmed even with the skip setting")
+    assert(S.deleteHeading:GetText()=="Delete for the whole guild?" and S.deleteMessage:GetText()=="Alpha||r Stone")
+    assert(S.deleteMessage.textColor[1]==.2 and state.pulls==pulls+1)
+    S.deleteCancel:Click()
+    assert(not S.deleteDialog:IsShown() and #state.removes==0 and #state.entries==3)
+
+    state.writeToken="token-1"; S.RefreshGuildBlacklist()
+    delete:Click()
+    state.onRemove=function()
+        S.deleteConfirm:Click()
+        S.rows[2].deleteButton:Click()
+    end
+    S.deleteConfirm:Click()
+    S.deleteConfirm:Click()
+    assert(#state.removes==1 and state.removes[1].name=="Alpha|r Stone" and state.removes[1].scope=="token-1")
+    assert(not S.deleteDialog:IsShown() and not S.scrim:IsShown() and not S.selected and #state.entries==2)
+    assert(S.footer:GetText()==footer,"no extra deletion notice")
+    state.writeToken=nil
+
+    reset(); S.Select(S.rows[1].record); delete:Click()
+    table.remove(state.entries,1)
+    S.deleteConfirm:Click()
+    assert(not S.deleteDialog:IsShown() and not S.selected,"an already missing entry closes the dialog")
+
+    for _,failure in ipairs({"unavailable","invalid_name","throw"}) do
+        reset(); delete:Click()
+        if failure=="throw" then state.onRemove=function() error("backend fault") end
+        else state.removeResult=failure end
+        S.deleteConfirm:Click()
+        assert(S.deleteDialog:IsShown() and S.deleteError:GetText()=="Deleting is unavailable."
+            and not S.deleteConfirm:IsEnabled() and #state.entries==3,failure)
+        S.deleteCancel:Click()
+    end
+    reset(); delete:Click()
+    assert(S.deleteDialog:IsShown() and S.deleteConfirm:IsEnabled(),"a failure does not block the next deletion")
+
+    state.scope,state.entries="guild-b",{{name="Alpha|r Stone"}}
+    S.RefreshGuildBlacklist()
+    S.deleteConfirm:Click()
+    assert(#state.entries==1 and #state.removes==0
+        and S.deleteError:GetText()=="Deleting is unavailable.","a guild change deletes nothing")
+
+    reset(); delete:Click()
+    state.writeToken="resumed-token"
+    S.deleteConfirm:Click()
+    assert(not S.deleteDialog:IsShown() and #state.entries==2 and state.removes[1].scope=="resumed-token",
+        "a resumed transport deletes with its current write token")
+    state.writeToken=nil
+
+    reset()
+    state.status="unavailable"; S.RefreshGuildBlacklist()
+    assert(delete:IsVisible() and not delete:IsEnabled() and row.deleteGlyph.vertexColor[1]==p.colors.disabled[1])
+    delete:Click()
+    assert(not S.deleteDialog:IsShown())
+    reset()
+    state.status="unavailable"
+    delete:Click()
+    assert(not S.deleteDialog:IsShown() and not delete:IsEnabled(),"writes lost since the last paint open no dialog")
+
+    reset()
+    local context=p.GuildBlacklist.context
+    p.GuildBlacklist.context=function()
+        p.GuildBlacklist.context=context
+        state.scope="guild-b"
+        return context()
+    end
+    delete:Click()
+    assert(not S.deleteDialog:IsShown(),"a guild change during the click opens no dialog")
+
+    reset()
+    s:fire(delete,"OnMouseDown","LeftButton")
+    table.insert(state.entries,1,{name="Aaron Stone"})
+    S.RefreshGuildBlacklist()
+    delete:Click()
+    assert(not S.deleteDialog:IsShown(),"a press cannot delete the entry that took over the row")
+    reset()
+    s:fire(delete,"OnMouseDown","LeftButton")
+    state.entries={{name="Alpha|r Stone"},{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    delete:Click()
+    assert(S.deleteDialog:IsShown(),"a rebuilt record for the same entry keeps the press")
+
+    reset()
+    state.onSync=function()
+        table.insert(state.entries,1,{name="Aaron Stone"})
+        S.RefreshGuildBlacklist()
+    end
+    delete:Click()
+    assert(row.record.fullName=="Aaron Stone" and S.deleteMessage:GetText()=="Alpha||r Stone")
+    S.deleteConfirm:Click()
+    assert(state.removes[1].name=="Alpha|r Stone" and state.entries[1].name=="Aaron Stone" and #state.entries==3)
+
+    reset()
+    state.status="unavailable"; S.RefreshGuildBlacklist()
+    assert(p.manual.save(nil,"friend","Quick Stone",""))
+    S.nav.friend:Click()
+    assert(S.rows[1].deleteButton:IsEnabled() and S.rows[1].deleteGlyph.vertexColor[1]==p.colors.deleteGlyph[1],
+        "a reused row does not stay disabled")
+    S.rows[1].deleteButton:Click()
+    assert(not S.deleteDialog:IsShown() and #p.manual.records==0,"Friends quick delete is unchanged")
+    assert(p.manual.save(nil,"blacklist","Quick Personal","",nil,{"other"}))
+    S.nav.blacklist:Click()
+    e.GetTime=function() return 200 end
+    S.rows[1].deleteButton:Click()
+    assert(not S.deleteDialog:IsShown() and #p.manual.records==0,"Personal quick delete is unchanged")
+    assert(s.forbiddenCalls==0)
+end
+
+-- An open guild delete closes with its entry and never keeps input blocked.
+do
+    local p,s,_,S,state=fresh()
+    local function reset()
+        S.window:Show()
+        state.entries={{name="Alpha Stone"},{name="Bravo Stone"}}
+        state.status,state.scope,state.removeResult="ready","guild-a",nil
+        state.removes={}
+        S.deleteDialog:Hide()
+        S.RefreshGuildBlacklist()
+    end
+    local function open()
+        reset()
+        S.rows[1].deleteButton:Click()
+        assert(S.deleteDialog:IsShown() and S.scrim:IsShown())
+    end
+    local function unblocked(case)
+        assert(not S.deleteDialog:IsShown() and not S.scrim:IsShown() and not S.deleteTarget,case)
+    end
+    S.nav.guildBlacklist:Click()
+
+    open()
+    state.entries={{name="ALPHA STONE"},{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    assert(S.deleteDialog:IsShown(),"a spelling change keeps the same entry")
+    state.entries={{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    unblocked("a peer removal closes the dialog")
+    state.entries={{name="Alpha Stone"},{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    S.deleteConfirm:Click()
+    assert(#state.removes==0 and #state.entries==2,"a re-added entry is not deleted by the closed dialog")
+    S.rows[2]:Click()
+    assert(S.selected.fullName=="Bravo Stone","rows stay clickable")
+    S.rows[1].deleteButton:Click()
+    assert(S.deleteDialog:IsShown() and S.deleteConfirm:IsEnabled())
+    S.deleteConfirm:Click()
+    assert(#state.removes==1 and #state.entries==1,"deleteBusy is released and a later delete works")
+    unblocked("own confirm closes through the synchronous notify")
+
+    open()
+    state.status,state.scope,state.entries="no_guild",nil,{}
+    S.RefreshGuildBlacklist()
+    unblocked("leaving the guild closes the dialog")
+
+    local close
+    for _,child in ipairs(S.deleteDialog.children) do
+        if child.kind=="Button" and child~=S.deleteConfirm and child~=S.deleteCancel then close=child end
+    end
+    local exits={
+        cancel=function() S.deleteCancel:Click() end,
+        close=function() close:Click() end,
+        window=function() S.window:Hide() end,
+    }
+    local conditions={
+        ready=function() end,
+        paused=function() state.status="unavailable" end,
+        settling=function() state.status,state.scope,state.entries="unavailable",nil,{} end,
+        failed=function() state.removeResult="unavailable"; S.deleteConfirm:Click() end,
+    }
+    for condition,apply in pairs(conditions) do
+        for exit,leave in pairs(exits) do
+            local case=condition.." "..exit
+            open()
+            apply()
+            S.RefreshGuildBlacklist()
+            assert(S.deleteDialog:IsShown(),case)
+            leave()
+            unblocked(case)
+            open()
+            S.deleteConfirm:Click()
+            assert(#state.removes==1,"a later delete works after "..case)
+            unblocked(case)
+        end
+    end
+
+    open()
+    state.removeResult="unavailable"
+    S.deleteConfirm:Click()
+    state.entries={}
+    S.RefreshGuildBlacklist()
+    assert(S.deleteDialog:IsShown() and S.deleteError:GetText()=="Deleting is unavailable.",
+        "the error state is not closed by the list")
+    S.deleteCancel:Click()
+    unblocked("error close")
+
+    for _,section in ipairs({"friend","blacklist"}) do
+        assert(p.manual.save(nil,section,"Kept "..section,"",nil,section=="blacklist" and {"other"} or nil))
+        S.nav[section]:Click()
+        S.rows[1].deleteButton:Click()
+        S.RefreshGuildBlacklist()
+        assert(S.deleteDialog:IsShown() and S.deleteTarget,"guild changes leave other delete dialogs open")
+        S.deleteCancel:Click()
+    end
+    assert(s.forbiddenCalls==0)
+end
+
+for _,locale in ipairs({"enUS","frFR"}) do
+    local french=locale=="frFR"
+    local p,s,e,S,state=fresh(nil,nil,locale)
+    S.nav.settings:Click(); S.settingsTabs.general:Click()
+    local skip=S.skipDeleteConfirmation
+    assert(visibleText(skip,french and "S'applique aux amis et à la liste noire personnelle."
+        or "Applies to Friends and Personal Blacklist."))
+    s:fire(skip,"OnEnter")
+    assert(e.GameTooltip:IsShown() and e.GameTooltip:GetText()==(french
+        and "La suppression dans la liste noire de guilde est toujours confirmée."
+        or "Guild Blacklist deletion is always confirmed."))
+    s:fire(skip,"OnLeave")
+    assert(not e.GameTooltip:IsShown())
+
+    state.entries={{name="Lune Stone"}}
+    S.nav.guildBlacklist:Click()
+    S.rows[1].deleteButton:Click()
+    assert(S.deleteHeading:GetText()==(french and "Supprimer pour toute la guilde ?" or "Delete for the whole guild?"))
+    S.deleteCancel:Click()
+
+    state.result="deleted"
+    S.nav.blacklist:Click(); S.addButton:Click()
+    local c=S.editor.controls
+    c.formName:SetText("Removed Stone"); c.reasonOptions.other:Click(); c.guildShare:Click(); c.formSave:Click()
+    assert(#state.attempts==1 and S.footer:GetText()==(french
+        and "Entrée ajoutée. Supprimée de la liste de guilde."
+        or "Saved to your Blacklist. Deleted from guild list."))
+    assert(s.forbiddenCalls==0)
 end
 
 print("RESULT Guild Blacklist navigation, consent, personal save, sharing, and layout passed in simulation")

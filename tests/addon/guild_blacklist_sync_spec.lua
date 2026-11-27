@@ -1309,5 +1309,483 @@ do
     check(#b.packets==start and rows(client)[cached],"a stale Q does not enqueue a same-guild snapshot for the new token")
 end
 
+local function removed(c, name)
+    local db=c.e.WhowhoGuildBlacklistDB
+    local records=db and db.removed and db.removed["3:101"]
+    return records and records[name]
+end
+
+local function sentBy(b, c, start, pattern)
+    local found=0
+    for index=start+1,#b.packets do
+        local packet=b.packets[index]
+        if packet.client==c and packet.message:match(pattern) then found=found+1 end
+    end
+    return found
+end
+
+do
+    local b=bus()
+    local a=b:client("Deleting Member")
+    local peer=b:client("Online Member")
+    b:advance(5)
+    local name="Gone Subject"
+    local scope=a.g.context()
+    check(a.g.add(name,{"fraud"},"Shared note",scope)=="shared","a row exists before deletion")
+    b:advance(5)
+    check(rows(peer)[name] and not a.e.WhowhoGuildBlacklistDB.removed,"no removal key exists before a deletion")
+    local refreshes, again=0
+    a.p.Shell.RefreshGuildBlacklist=function()
+        refreshes=refreshes+1
+        again=a.g.remove(name,scope)
+    end
+    local start=#b.packets
+    check(a.g.remove("GONE subject",scope)=="removed" and again=="missing" and refreshes==1,
+        "case-insensitive remove notifies once and a reentrant duplicate finds nothing")
+    a.p.Shell.RefreshGuildBlacklist=nil
+    local saved=a.e.WhowhoGuildBlacklistDB
+    check(#a.g.list()==0 and not saved.scopes["3:101"][name] and next(saved.scopes["3:101"])==nil
+        and removed(a,name).gone==true and saved.version==1,"removal persists beside an empty scope")
+    b:advance(0)
+    check(b.packets[start+1].message==string.format("X|3:101|%.0f,1,%s",removed(a,name).rev,name)
+        and not next(rows(peer)) and removed(peer,name).gone==true,
+        "the removal is pushed at once and an online peer applies and saves it")
+    local record=removed(peer,name)
+    event(peer,"E|3:101|MAGE,12799,"..name)
+    event(peer,"E|3:101|,0,GONE SUBJECT")
+    for _, packet in ipairs(detailPackets("3:101","3.1","12799|spam|"..name.."|Stale note")) do event(peer,packet) end
+    check(not next(rows(peer)) and not next(peer.e.WhowhoGuildBlacklistDB.scopes["3:101"])
+        and removed(peer,name).rev==record.rev,"stale class and detail packets cannot recreate a removed name")
+
+    a.online,peer.online=false,false
+    local reloaded=b:client("Reloaded Deleter",{shared=saved})
+    start=#b.packets
+    event(reloaded,"E|3:101|,0,"..name)
+    b:advance(0)
+    check(not next(rows(reloaded)) and removed(reloaded,name).gone,"a removal survives reload")
+    check(sentBy(b,reloaded,start,"^H|")==1,"a client holding only removals announces itself")
+    local stale={version=1,scopes={["3:101"]={[name]={class="MAGE",rev=12799}}}}
+    b:advance(100)
+    local returning=b:client("Offline Member",{shared=stale})
+    b:advance(20)
+    check(not rows(returning)[name] and removed(returning,name).gone and not rows(reloaded)[name],
+        "an offline holder catches up from a peer that has no rows left")
+    local empty=b:client("Brand New Member")
+    b:advance(120)
+    check(removed(empty,name) and removed(empty,name).gone,"a client with no data receives removals too")
+
+    local old=removed(reloaded,name).rev
+    local personal=add(reloaded,name,"MAGE","Personal note")
+    local records=reloaded.e.WhowhoGuildBlacklistDB.removed
+    b:advance(5)
+    start=#b.packets
+    check(share(reloaded,personal,"stale",true)=="unavailable"
+        and share(reloaded,personal,(reloaded.g.context()),true)=="deleted",
+        "sharing a personal entry cannot restore a removed name")
+    b:advance(5)
+    check(not next(rows(reloaded)) and reloaded.e.WhowhoGuildBlacklistDB.removed==records
+        and removed(reloaded,name).gone and removed(reloaded,name).rev==old and #b.packets==start
+        and next(reloaded.e.WhowhoGuildBlacklistDB.scopes["3:101"])==nil,
+        "a refused share leaves rows and records untouched and sends nothing")
+    check(reloaded.g.add(name,{"spam"},nil,(reloaded.g.context()))=="shared","adding again restores the name")
+    start=#b.packets
+    b:advance(5)
+    check(removed(reloaded,name).gone==false and removed(reloaded,name).rev>old
+        and rows(returning)[name] and rows(returning)[name].reasonIds[1]=="spam" and removed(returning,name).gone==false,
+        "the restore reaches a peer that had applied the removal")
+    event(returning,string.format("X|3:101|%.0f,1,%s",old,name))
+    event(returning,string.format("X|3:101|%.0f,0,%s",old,name))
+    check(rows(returning)[name] and removed(returning,name).gone==false,"an older removal cannot override a restore")
+    local tie=removed(returning,name).rev
+    event(returning,string.format("X|3:101|%.0f,1,%s",tie,name))
+    event(returning,string.format("X|3:101|%.0f,0,%s",tie,name))
+    check(not rows(returning)[name] and removed(returning,name).gone==true,"equal revisions resolve to removal")
+end
+
+do
+    local b=bus()
+    local name="Catch Up"
+    local seeded={version=1,scopes={["3:101"]={["Kept Subject"]={rev=0}}},
+        removed={["3:101"]={[name]={rev=12800,gone=false}}}}
+    local holder=b:client("Restored Holder",{shared=seeded})
+    holder.g.add(name,{"spam"},nil,(holder.g.context()))
+    b:advance(100)
+    local late=b:client("Late Member",{shared={version=1,scopes={["3:101"]={}},
+        removed={["3:101"]={[name]={rev=12799,gone=true}}}}})
+    local start=#b.packets
+    b:advance(120)
+    local first
+    for index=start+1,#b.packets do
+        local packet=b.packets[index]
+        local command=packet.message:sub(1,1)
+        if packet.client==holder and (command=="X" or command=="E") then first=first or command end
+    end
+    check(first=="X" and rows(late)[name] and removed(late,name).gone==false,
+        "a snapshot sends removal records ahead of rows so a restore arrives first")
+end
+
+do
+    local b=bus()
+    local function cache()
+        return {version=1,scopes={["3:101"]={}},removed={["3:101"]={["Same Removal"]={rev=12799,gone=true}}}}
+    end
+    local a=b:client("First Record Holder",{shared=cache()})
+    local peer=b:client("Second Record Holder",{shared=cache()})
+    b:advance(200)
+    local start=#b.packets
+    b:client("Record Requester")
+    b:advance(16)
+    check(sentBy(b,a,start,"^X|")+sentBy(b,peer,start,"^X|")==1,
+        "an equivalent holder drops its redundant queued record")
+end
+
+do
+    local b=bus()
+    local a=b:client("Record Guard")
+    b:advance(5)
+    event(a,"E|3:101|,0,Valid Name")
+    local saved=a.e.WhowhoGuildBlacklistDB
+    for _, payload in ipairs({
+        "12800,2,Valid Name","12800,1,Onlyone","x,1,Valid Name","12800,1,Valid Name|broken",
+        "12800,1,Valid Name|12800,1,Valid Name","12800,1,Valid Name|","0,1,Valid Name",
+        "549755813887,1,Valid Name","99999999999999999999,1,Valid Name",
+        "12800,1,"..string.rep("x",240).." Name",
+    }) do event(a,"X|3:101|"..payload) end
+    event(a,"X|3:202|12800,1,Valid Name")
+    event(a,"X|3:101|12800,1,Valid Name",nil,"OFFICER")
+    event(a,a.s.secret)
+    check(rows(a)["Valid Name"] and not saved.removed,"invalid, future and foreign removals are ignored")
+    a.locked=true
+    event(a,"X|3:101|12800,1,Valid Name")
+    a.locked=false
+    check(rows(a)["Valid Name"] and not saved.removed,"an unready client ignores removals")
+    event(a,"X|3:101|12800,1,Never Seen")
+    check(removed(a,"Never Seen").gone,"a removal is saved even without a row")
+
+    local scope=a.g.context()
+    check(a.g.remove("One",scope)=="invalid_name" and a.g.remove(a.s.secret,scope)=="invalid_name"
+        and a.g.remove("Absent Name",scope)=="missing" and a.g.remove("Valid Name","stale")=="unavailable"
+        and a.g.remove("Valid Name",a.s.secret)=="unavailable","remove validates its inputs")
+    a.locked=true
+    check(a.g.remove("Valid Name",scope)=="unavailable","an unready transport cannot delete")
+    a.locked=false
+    scope=a.g.context()
+    local serverTime=a.e.GetServerTime
+    local reads=0
+    a.e.GetServerTime=function()
+        reads=reads+1
+        if reads==2 then rotateScope(a) end
+        return serverTime()
+    end
+    check(a.g.remove("Valid Name",scope)=="unavailable" and rows(a)["Valid Name"] and not removed(a,"Valid Name"),
+        "a scope rotating during a native read changes nothing")
+    a.e.GetServerTime=serverTime
+    scope=a.g.context()
+    a.guild=202
+    check(a.g.remove("Valid Name",scope)=="unavailable" and not removed(a,"Valid Name"),
+        "a stale guild scope changes nothing")
+end
+
+do
+    local b=bus()
+    local a=b:client("Queue Dropper")
+    local peer=b:client("Queue Watcher")
+    b:advance(5)
+    local name="Queued Victim"
+    local scope=a.g.context()
+    check(a.g.add(name,{"fraud"},string.rep("long note ",20),scope)=="shared"
+        and a.g.remove(name,scope)=="removed","remove before the queued row is sent")
+    local start=#b.packets
+    b:advance(40)
+    check(sentBy(b,a,start,"^[ED]|")==0 and sentBy(b,a,start,"^X|")==1 and not rows(peer)[name],
+        "queued class and detail packets of a removed name are never sent")
+
+    a.sendResult=function(message) return message:match("^E|") and 3 or 0 end
+    check(a.g.add("Retry Victim",{"fraud"},nil,scope)=="shared","a row enters retry backoff")
+    b:advance(1.3)
+    a.sendResult=nil
+    start=#b.packets
+    check(a.g.remove("Retry Victim",scope)=="removed","remove during the row retry")
+    b:advance(40)
+    check(sentBy(b,a,start,"^[ED]|")==0 and not rows(peer)["Retry Victim"],"the removed row retry is discarded")
+
+    check(a.g.add("Throttled Removal",{"fraud"},nil,scope)=="shared","a delivered row precedes a throttled removal")
+    b:advance(5)
+    local attempts=0
+    a.sendResult=function(message)
+        if message:match("^X|") then attempts=attempts+1; if attempts<3 then return 8 end end
+        return 0
+    end
+    check(a.g.remove("Throttled Removal",scope)=="removed","the removal is queued")
+    b:advance(15)
+    check(attempts==3 and not rows(peer)["Throttled Removal"],"a throttled removal retries until delivered")
+
+    check(a.g.add("Paused Removal",{"fraud"},nil,scope)=="shared","a row precedes a paused removal")
+    b:advance(5)
+    check(a.g.remove("Paused Removal",scope)=="removed","the removal is queued before lockdown")
+    a.locked=true
+    b:advance(1)
+    check(rows(peer)["Paused Removal"],"lockdown holds the queued removal")
+    a.locked=false
+    b:advance(20)
+    check(not rows(peer)["Paused Removal"],"a readiness timer alone resumes a queued removal")
+end
+
+do
+    local b=bus()
+    local name="Downgraded Return"
+    local cache={version=1,scopes={["3:101"]={[name]={class="MAGE",rev=12799},["Other Subject"]={rev=0}}},
+        removed={["3:101"]={[name]={rev=12799,gone=true}}}}
+    local a=b:client("Upgraded Again",{shared=cache})
+    check(not rows(a)[name] and rows(a)["Other Subject"] and not cache.scopes["3:101"][name]
+        and cache.removed["3:101"][name].gone,"a loaded row with a removal record is dropped and persisted")
+    local plain={version=1,scopes={["3:101"]={["Old Save"]={rev=0}}}}
+    local older=b:client("Older Save",{shared=plain})
+    check(rows(older)["Old Save"] and plain.removed==nil,"a save without removals loads unchanged")
+    for _, bad in ipairs({
+        5, {["3:101"]=5}, {["3:202"]={}}, {["3:101"]={Onlyone={rev=1,gone=true}}},
+        {["3:101"]={[name]={rev=0,gone=true}}}, {["3:101"]={[name]={rev=1,gone=1}}},
+        {["3:101"]={[name]=true}},
+    }) do
+        local corrupt={version=1,scopes={["3:101"]={}},removed=bad}
+        local client=b:client("Bad Removal Cache",{shared=corrupt})
+        check(client.g.context()==nil and corrupt.removed==bad,"an invalid removal cache is preserved and unused")
+        client.online=false
+    end
+end
+
+do
+    local b=bus()
+    local seeded=seededCache(2)
+    local records={}
+    for index=1,512 do records["Record"..index.." Subject"]={rev=1000+index,gone=true} end
+    seeded.removed={["3:101"]=records}
+    local a=b:client("Capped Records",{shared=seeded})
+    b:advance(2)
+    check(a.g.remove("Seed1 Subject",a.g.context())=="removed","remove at the record cap")
+    local function size()
+        local total=0
+        for _ in pairs(a.e.WhowhoGuildBlacklistDB.removed["3:101"]) do total=total+1 end
+        return total
+    end
+    check(size()==512 and not removed(a,"Record1 Subject") and removed(a,"Record2 Subject")
+        and removed(a,"Seed1 Subject").gone,"a local removal drops the oldest record")
+    event(a,"X|3:101|12800,1,Incoming Subject")
+    check(size()==512 and not removed(a,"Record2 Subject") and removed(a,"Incoming Subject"),
+        "a received removal respects the same cap")
+end
+
+do
+    local b=bus()
+    local seeded=seededCache(512)
+    seeded.removed={["3:101"]={["Zzz Subject"]={rev=12799,gone=true}}}
+    local a=b:client("Full Restore",{shared=seeded})
+    b:advance(2)
+    local start=#b.packets
+    check(a.g.add("Zzz Subject",{"fraud"},nil,(a.g.context()))=="limit" and removed(a,"Zzz Subject").gone
+        and removed(a,"Zzz Subject").rev==12799,"a restore that cannot be stored keeps the removal")
+    check(a.g.add("Zzz Subject",{"fraud"},"\t",a.g.context())=="invalid_note","an invalid restore is refused")
+    b:advance(5)
+    check(sentBy(b,a,start,"^[XED]|")==0,"a refused restore queues nothing")
+    check(a.g.remove("Seed1 Subject",(a.g.context()))=="removed" and removed(a,"Zzz Subject").gone
+        and removed(a,"Zzz Subject").rev==12799,"a later write still saves the refused name as removed")
+end
+
+do
+    local b=bus()
+    local a=b:client("Cutoff Remover",{shared=seededCache(512)})
+    b:advance(2)
+    local scope=a.g.context()
+    check(a.g.remove("Seed99 Subject",scope)=="removed" and a.g.add("Alpha Subject",{"fraud"},nil,scope)=="shared"
+        and a.g.add("Beta Subject",{"fraud"},nil,scope)=="shared","removing the byte-last row keeps the cap usable")
+    local entries=rows(a)
+    check(#a.g.list()==512 and entries["Alpha Subject"] and entries["Beta Subject"] and not entries["Seed98 Subject"],
+        "the next addition at capacity displaces the new byte-last row")
+end
+
+do
+    local b=bus()
+    local shared={version=1,scopes={}}
+    for club=1,32 do shared.scopes["3:"..(500+club)]={} end
+    local a=b:client("Scope Limited",{shared=shared})
+    event(a,"X|3:101|12800,1,Valid Name")
+    check(not shared.scopes["3:101"] and not shared.removed,"removals cannot exceed the scope limit")
+end
+
+for _, outcome in ipairs({"sent","dropped"}) do
+    local b=bus()
+    local a=b:client("Quick Remover")
+    local peer=b:client("Watching Member")
+    b:advance(5)
+    local name="Quick Return"
+    local scope=a.g.context()
+    check(a.g.add(name,{"spam"},"Old note",scope)=="shared","a row precedes a quick re-add")
+    b:advance(10)
+    check(rows(peer)[name] and rows(peer)[name].note=="Old note","the peer holds the old details")
+    a.sendResult=function(message) return message:match("^X|") and 8 or 0 end
+    check(a.g.remove(name,scope)=="removed","the removal is queued behind a throttle")
+    b:advance(1)
+    local record=removed(a,name)
+    local rev,start=record.rev,#b.packets
+    check(a.g.add(name,{"fraud"},nil,scope)=="unavailable","a re-add waits for the unsent removal")
+    check(not rows(a)[name] and removed(a,name)==record and record.gone and record.rev==rev,
+        "a refused re-add changes no row or record")
+    if outcome=="sent" then a.sendResult=nil end
+    b:advance(30)
+    check(sentBy(b,a,start,"^[ED]|")==0 and sentBy(b,a,start,"^X|")>=1,"a refused re-add queues nothing")
+    check((rows(peer)[name]==nil)==(outcome=="sent"),"the queued removal still reaches the peer unless dropped")
+    a.sendResult=nil
+    check(a.g.add(name,{"fraud"},nil,scope)=="shared","a re-add restores once the removal left the queue: "..outcome)
+    b:advance(15)
+    if outcome=="sent" then
+        local entry=rows(peer)[name]
+        check(entry and #entry.reasonIds==1 and entry.reasonIds[1]=="fraud" and not entry.note
+            and removed(peer,name).gone==false,"the peer ends without the old reasons and note")
+    end
+end
+
+-- Every way a queued removal can stall ends, and the refused re-add works again.
+for _, path in ipairs({"throttled","failing","lockdown","timer fault","guild change","missed timer"}) do
+    local b=bus()
+    local a=b:client("Stalled Remover")
+    b:advance(5)
+    local name="Stalled Return"
+    check(a.g.add(name,{"spam"},nil,(a.g.context()))=="shared","a row precedes the stalled removal")
+    b:advance(10)
+    local attempts=0
+    if path=="throttled" or path=="failing" then
+        a.sendResult=function(message)
+            if message:match("^X|") then attempts=attempts+1; return path=="throttled" and 8 or 9 end
+            return 0
+        end
+    elseif path=="timer fault" then a.timerThrows=true end
+    check(a.g.remove(name,(a.g.context()))=="removed","the removal is accepted without waiting for a send: "..path)
+    local start=#b.packets
+    if path=="lockdown" then a.locked=true
+    elseif path=="guild change" then
+        a.guild=202; a.s:event("PLAYER_GUILD_UPDATE","player")
+    elseif path=="missed timer" then
+        local calls=0
+        a.e.GetTime=function()
+            calls=calls+1
+            if calls==2 then return nil end
+            return b.time
+        end
+    end
+    b:advance(120)
+    if path=="throttled" or path=="failing" then
+        check(attempts==3,"retries are exhausted: "..path)
+        a.sendResult=nil
+    elseif path=="lockdown" then
+        check(a.g.add(name,{"fraud"},nil,"stale")=="unavailable","a locked transport refuses the re-add")
+        a.locked=false
+    elseif path=="timer fault" then
+        check(a.g.context()==nil,"a timer fault leaves the whole transport unavailable")
+        a.timerThrows=false
+        a.s:event("PLAYER_ENTERING_WORLD",false,false)
+    elseif path=="guild change" then
+        a.guild=101; a.s:event("PLAYER_GUILD_UPDATE","player")
+        b:advance(5)
+    end
+    local result=a.g.add(name,{"fraud"},nil,(a.g.context()))
+    if path=="lockdown" or path=="timer fault" or path=="missed timer" then
+        check(result=="unavailable" and sentBy(b,a,start,"^X|")==0,"the removal is still queued: "..path)
+        b:advance(20)
+        check(sentBy(b,a,start,"^X|")>=1,"the queued removal is sent: "..path)
+        result=a.g.add(name,{"fraud"},nil,(a.g.context()))
+    end
+    check(result=="shared" and rows(a)[name],"the re-add works once the transport is usable: "..path)
+end
+
+-- Deletion never waits for the sync request or for its own send.
+do
+    local b=bus()
+    local a=b:client("Lonely Deleter")
+    b:advance(5)
+    check(a.g.add("Unanswered Subject",{"spam"},nil,(a.g.context()))=="shared","a row exists to delete")
+    b:advance(10)
+    a.sendResult=9
+    a.noEcho=true
+    a.p.Toggle()
+    local S=a.p.Shell
+    S.nav.guildBlacklist:Click()
+    b:advance(40)
+    a.sendResult=nil
+    S.RefreshGuildBlacklist()
+    b:advance(40)
+    a.sendResult=9
+    S.rows[1].deleteButton:Click()
+    check(S.deleteDialog:IsShown() and S.deleteConfirm:IsEnabled(),"the dialog does not wait for a sync reply")
+    S.deleteConfirm:Click()
+    check(not S.deleteDialog:IsShown() and not S.scrim:IsShown() and not rows(a)["Unanswered Subject"],
+        "confirm gives its result at once, with no reply and a failing send")
+end
+
+-- The open dialog survives a transport pause, but not new or unsettled membership.
+for _, change in ipairs({"restriction toggled","still paused","membership resettled","membership settling","guild change"}) do
+    local b=bus()
+    local a=b:client("Dialog Deleter")
+    local peer=b:client("Dialog Watcher")
+    b:advance(5)
+    local name="Dialog Subject"
+    check(a.g.add(name,{"spam"},nil,(a.g.context()))=="shared","a row exists for the dialog")
+    b:advance(10)
+    a.p.Toggle()
+    local S=a.p.Shell
+    S.nav.guildBlacklist:Click()
+    S.rows[1].deleteButton:Click()
+    check(S.deleteDialog:IsShown(),"the dialog opens: "..change)
+    local token=a.g.context()
+    if change=="restriction toggled" then
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,2)
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,0)
+        check(a.g.context() and a.g.context()~=token,"the toggle issues a new write token")
+    elseif change=="still paused" then
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,2)
+    else
+        if change=="guild change" then a.guild=202 end
+        a.s:event("PLAYER_GUILD_UPDATE","player")
+        if change=="membership resettled" then b:advance(5) end
+        if change=="guild change" then b:advance(5) end
+    end
+    -- A guild change closes the dialog itself; a click on its hidden button must still delete nothing.
+    S.deleteConfirm:Click()
+    b:advance(10)
+    if change=="restriction toggled" then
+        check(not S.deleteDialog:IsShown() and not rows(a)[name] and not rows(peer)[name],
+            "confirm after a toggle deletes for the guild")
+    else
+        check(not a.e.WhowhoGuildBlacklistDB.removed and rows(peer)[name],"nothing is deleted: "..change)
+        check(change=="guild change" and not S.deleteDialog:IsShown()
+            or S.deleteError:GetText()=="Deleting is unavailable.","the dialog reports or has closed: "..change)
+    end
+end
+
+-- At the record cap, a removal older than every held record is ignored whole.
+do
+    local b=bus()
+    local seeded=seededCache(2)
+    local records={}
+    for index=1,512 do records["Record"..index.." Subject"]={rev=1000+index,gone=true} end
+    seeded.removed={["3:101"]=records}
+    local a=b:client("Capped Receiver",{shared=seeded})
+    b:advance(2)
+    local function held()
+        local total=0
+        for _ in pairs(a.e.WhowhoGuildBlacklistDB.removed["3:101"]) do total=total+1 end
+        return total
+    end
+    local refreshes=0
+    a.p.Shell.RefreshGuildBlacklist=function() refreshes=refreshes+1 end
+    event(a,"X|3:101|1000,1,Seed1 Subject")
+    check(rows(a)["Seed1 Subject"] and refreshes==0 and held()==512 and not removed(a,"Seed1 Subject")
+        and removed(a,"Record1 Subject"),"an older removal at the cap changes nothing")
+    event(a,"E|3:101|,0,Seed1 Subject")
+    check(rows(a)["Seed1 Subject"] and refreshes==0,"a stale row packet has nothing to bring back")
+    event(a,"X|3:101|12800,1,Seed1 Subject")
+    check(not rows(a)["Seed1 Subject"] and removed(a,"Seed1 Subject").gone and held()==512
+        and not removed(a,"Record1 Subject") and refreshes==1,"a newer removal at the cap still applies")
+end
+
 check(H.forbiddenCalls==0,"the fake bus never invokes real native actions")
 print(string.format("RESULT guild-blacklist-sync %d passed",count))

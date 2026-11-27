@@ -88,7 +88,21 @@ end
 local function colorName(label,record,whiteRosterName,verifiedClass)
     label:SetTextColor(P.NameColor(record,whiteRosterName,verifiedClass))
 end
+-- A peer can delete and re-add the entry, so its open confirmation closes once it is unlisted.
+local function closeStaleGuildDelete()
+    local target=S.deleteTarget
+    if not (target and target.guild) then return end
+    local records,scope,status=guildRecords()
+    -- Unsettled membership lists nothing and says nothing about the entry.
+    if not scope and status~="no_guild" then return end
+    local key=P.GuildBlacklistName.Key(target.name)
+    for _,record in ipairs(records) do
+        if record.searchKey==key then return end
+    end
+    S.deleteDialog:Hide()
+end
 function S.RefreshGuildBlacklist()
+    closeStaleGuildDelete()
     if S.editor then S.editor.RefreshGuildShare() end
     if guildPage() and S.window and S.window:IsVisible() then S.Refresh() end
     if S.settings and S.settings.RefreshGuildAvailability then S.settings:RefreshGuildAvailability() end
@@ -112,10 +126,16 @@ local function showDeleteError(issue)
 end
 local function showDeleteDialog(record, target, issue)
     S.deleteTarget=target
-    S.deleteHeading:SetText(L(issue and "Could not delete entry" or "Are you sure to delete?"))
-    S.deleteMessage:SetText(record.fullName)
-    local blacklist=record.membership=="blacklist"
-    colorName(S.deleteMessage,record,nil,blacklist and roster.DisplayClass(record,true) or nil)
+    local guild=record.membership=="guildBlacklist"
+    S.deleteHeading:SetText(L(issue and "Could not delete entry"
+        or guild and "Delete for the whole guild?" or "Are you sure to delete?"))
+    S.deleteMessage:SetText(guild and displayText(record.fullName) or record.fullName)
+    if guild then
+        colorName(S.deleteMessage,nil,true,roster.DisplayClass(record,false))
+    else
+        local blacklist=record.membership=="blacklist"
+        colorName(S.deleteMessage,record,nil,blacklist and roster.DisplayClass(record,true) or nil)
+    end
     S.deleteNameHeight=math.max(48,math.ceil(S.deleteMessage:GetStringHeight()))
     S.deleteMessage:SetHeight(S.deleteNameHeight)
     S.deleteDialog:SetHeight(112+S.deleteNameHeight)
@@ -130,7 +150,17 @@ local function showDeleteDialog(record, target, issue)
     S.deleteDialog:Raise()
 end
 local function deleteRecord(target)
-    local ok, issue=P.manual.delete(target)
+    local ok, issue
+    if target.guild then
+        -- A paused transport resumes with a new write token; the read scope still identifies the same guild.
+        local token,_,scope=guildContext()
+        local called,result
+        if token and scope==target.scope then called,result=pcall(P.GuildBlacklist.remove,target.name,token) end
+        ok=called and (result=="removed" or result=="missing")
+        issue="Deleting is unavailable."
+    else
+        ok,issue=P.manual.delete(target)
+    end
     if ok then S.deleteDialog:Hide(); S.Select(nil) end
     return ok,issue
 end
@@ -337,7 +367,9 @@ function S.Refresh(resetSelectionScroll)
     for i,row in ipairs(S.rows) do
         local record=i<=visibleRows and S.filtered[S.offset+i] or nil
         local available,inviteIssue,muted
-        if personal then
+        if guild then
+            available=writeToken~=nil
+        elseif personal then
             local mute=P.manual.chatMute
             available=mute.available() and mute.canMute(record)
             muted=available and mute.muted(record)
@@ -569,9 +601,26 @@ local function inviteOrMuteRosterRow(row,button,key,press)
     local _,message=P.manual.invite.request(record)
     showFooter(message)
 end
+local function requestGuildDelete(row,record)
+    local owner=row.inputOwner
+    local token,_,scope=guildContext()
+    if row.inputOwner~=owner or not guildPage() or not row:IsVisible() or rosterPointerBlocked() then return end
+    if not token or scope~=record.scope then S.Refresh(); return end
+    showDeleteDialog(record,{guild=true,name=record.fullName,scope=record.scope})
+    -- Can refresh and rebind rows at once, so the dialog target is captured first.
+    requestGuildSync()
+end
 local function deleteRosterRow(row,_,_,press)
     local record=row.record
-    if guildPage() or not record or (press and press.record~=record) or deleteBusy or rosterPointerBlocked() then return end
+    local guild=guildPage()
+    -- Guild records are rebuilt on refresh; bindClick already rejects a press whose row changed entry.
+    if not record or (not guild and press and press.record~=record) or deleteBusy or rosterPointerBlocked() then return end
+    if guild then
+        deleteBusy=true
+        requestGuildDelete(row,record)
+        deleteBusy=false
+        return
+    end
     local target={id=record.id,region=record.region,fullName=record.fullName,guid=record.guid,membership=record.membership}
     deleteBusy=true
     if P.db.skipDeleteConfirmation then
@@ -945,6 +994,7 @@ function S.Create()
             if lookupClass then S.ResetFooter(); lookupSavedBlacklistClass(record) end
             if result and result~="shared" and result~="unchanged" then
                 local message=result=="limit" and "Saved to your Blacklist. Guild list full."
+                    or result=="deleted" and "Saved to your Blacklist. Deleted from guild list."
                     or "Saved to your Blacklist. Guild sharing unavailable."
                 guildShareNotice=showFooter(message)
             end

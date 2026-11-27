@@ -140,17 +140,68 @@ local function retainRow(data, identity, old, row)
     return true, displaced
 end
 
+-- Newer revision wins; a tie goes to the removal.
+local function supersedes(incoming, old)
+    return not old or incoming.rev > old.rev
+        or incoming.rev == old.rev and incoming.gone and not old.gone
+end
+
+local function putRecord(data, identity, record)
+    data.removed[identity]=record
+    local size, oldest, best=0
+    for key, held in pairs(data.removed) do
+        size=size+1
+        if not best or held.rev < best.rev or held.rev == best.rev and N.PreferDisplay(key,oldest) == key then
+            oldest,best=key,held
+        end
+    end
+    -- shortcut: MAX_ROWS records per scope; a name whose record is dropped can return from a stale peer.
+    if size > MAX_ROWS then data.removed[oldest]=nil end
+end
+
+local function dropRow(data, identity)
+    local row=data.rows[identity]
+    if not row then return end
+    data.saved[row.name]=nil
+    data.rows[identity]=nil
+    data.count=data.count-1
+    if data.lastIdentity == identity then
+        local last
+        for key in pairs(data.rows) do
+            if not last or N.PreferDisplay(last,key) == last then last=key end
+        end
+        data.lastIdentity=last
+    end
+end
+
+local function loadRecords(data, records)
+    if not plain(records) then return end
+    local size=0
+    for name, record in pairs(records) do
+        size=size+1
+        if size > MAX_ROWS or not readable(name) or not validName(name) or not plain(record) then return end
+        local rev, gone=record.rev, record.gone
+        if not readable(rev) or not readable(gone) or not integer(rev,MAX_REVISION) or type(gone) ~= "boolean" then return end
+        local identity=N.Key(name)
+        local loaded={name=name,rev=rev,gone=gone}
+        if supersedes(loaded,data.removed[identity]) then data.removed[identity]=loaded end
+    end
+    return true
+end
+
 local function loadStore(saved)
     if not readable(saved) then return end
     if saved == nil then return {}, 0 end
     if not plain(saved) or member(saved,"version") ~= 1 or not plain(saved.scopes) then return end
+    local removed=saved.removed
+    if not readable(removed) or removed ~= nil and not plain(removed) then return end
     local scopes, migrated, count = {}, {}, 0
     for key, rows in pairs(saved.scopes) do
         count=count+1
         if count > MAX_SCOPES or not readable(key) or type(key) ~= "string" or #key > 31 or not plain(rows) then return end
         local region, club = key:match("^(%d+):(%d+)$")
         if scopeKey(tonumber(region),club) ~= key then return end
-        local data, size = {rows={},saved={},count=0}, 0
+        local data, size = {rows={},saved={},count=0,removed={}}, 0
         for name, row in pairs(rows) do
             size=size+1
             if size > MAX_ROWS or not readable(name) or not validName(name) or not validRow(row) then return end
@@ -162,7 +213,19 @@ local function loadStore(saved)
             retainRow(data,identity,old,merged)
         end
         scopes[key]=data
+        local records
+        if removed then records=removed[key] end
+        if records ~= nil then
+            if not loadRecords(data,records) then return end
+            -- A downgraded client can have re-added a removed name.
+            for identity, record in pairs(data.removed) do
+                if record.gone then dropRow(data,identity) end
+            end
+        end
         if size ~= data.count then migrated[key]=data.saved end
+    end
+    for key in pairs(removed or {}) do
+        if not readable(key) or not scopes[key] then return end
     end
     return scopes, count, migrated
 end
@@ -174,6 +237,12 @@ local function publish(current)
     end
     if WhowhoGuildBlacklistDB == nil then WhowhoGuildBlacklistDB={version=1, scopes={}} end
     WhowhoGuildBlacklistDB.scopes[current.key]=current.data.saved
+    if next(current.data.removed) then
+        local records={}
+        for _, record in pairs(current.data.removed) do records[record.name]={rev=record.rev,gone=record.gone} end
+        WhowhoGuildBlacklistDB.removed=WhowhoGuildBlacklistDB.removed or {}
+        WhowhoGuildBlacklistDB.removed[current.key]=records
+    end
 end
 
 local function notify()
@@ -250,7 +319,8 @@ local function verify()
     if (state and state.key) ~= key then
         state=key and {key=key, region=region, push={}, snapshot={}, requests={}, retries={}, acks={},
             pushDetails={}, snapshotDetails={}, detailPending={}, activeDetails={},
-            data=db[key] or {rows={},saved={},count=0}, pullAt=0, pullKind="announce", nativeReady=nativeReady} or nil
+            pushRemoved={}, snapshotRemoved={},
+            data=db[key] or {rows={},saved={},count=0,removed={}}, pullAt=0, pullKind="announce", nativeReady=nativeReady} or nil
     elseif state then
         state.timer=nil
     end
@@ -368,6 +438,8 @@ end
 
 local function merge(current, identity, name, classUpdate, reasonIds, note, noteRev)
     local data=current.data
+    local record=data.removed[identity]
+    if record and record.gone then return "unchanged" end
     local old=data.rows[identity]
     local row=combine(old,name,classUpdate,reasonIds,note,noteRev)
     if row == old then return "unchanged" end
@@ -421,7 +493,27 @@ local function publishShare(current, name, class, reasons, approvedNote, first, 
         noteRev=nextRevision(first,last,old and old.noteRev)
         if noteRev then note=approvedNote end
     end
+    local record, restored=current.data.removed[identity]
+    -- shortcut: a restore does not date rows, so a peer that missed the removal can merge old reasons and note back; tie a row data revision to the restore.
+    if record and record.gone then
+        -- Restoring now would overwrite the unsent removal, so peers would never learn of it.
+        local pending=current.pushRemoved[identity]
+        -- shortcut: the queue is not saved, so a reload or guild change empties it and a re-add before the next sync overwrites the removal for peers; persist pending removals if reported.
+        -- A flush can end without a timer, so the refusal re-arms the send it waits for.
+        if pending and pending.gone then schedule(current); return "unavailable" end
+        local revision=nextRevision(first,last,record.rev)
+        if not revision then return "unavailable" end
+        restored={name=name,rev=revision,gone=false}
+        current.data.removed[identity]=restored
+    end
     local result, row=merge(current,identity,name,classUpdate,reasons,note,noteRev)
+    if restored then
+        if result == "shared" then
+            current.pushRemoved[identity],current.snapshotRemoved[identity]=restored,nil
+        else
+            current.data.removed[identity]=record
+        end
+    end
     if result == "shared" then
         if classUpdate or old and row.name ~= old.name then current.push[identity]=row end
         local reasonsChanged=reasons and (not old or row.reasonIds ~= old.reasonIds)
@@ -453,6 +545,9 @@ function G.share(record, expectedScope, consent)
         or saved.membership ~= member(record,"membership") or saved.identityState ~= member(record,"identityState")
         or saved.region ~= member(record,"region") or saved.fullName ~= member(record,"fullName")
         or not readable(record.guid) or saved.guid ~= record.guid or not validName(saved.fullName) then return "invalid_record" end
+    local removal=current.data.removed[N.Key(saved.fullName)]
+    -- Only a direct Add restores a removed name.
+    if removal and removal.gone then return "deleted" end
     local reasons=matchingReasons(approvedReasons,saved.reasonIds)
     local note=approvedNote == saved.note and approvedNote or nil
     return publishShare(current,saved.fullName,verifiedClass(saved),reasons,note,first,last)
@@ -471,7 +566,47 @@ function G.add(name, reasonIds, note, expectedScope, ownsSave)
     if N.Key(name) == N.Key(playerName) then return "self" end
     -- All native policy/scope reads must finish before the first durable row or queue change.
     if ownsSave and not ownsSave() or not ownsReady(current,expectedScope) then return "unavailable" end
+    -- shortcut: an Add before the removal arrives writes no record, so that older removal drops its row; record every direct Add.
     return publishShare(current,name,nil,reasons,note ~= "" and note or nil,first,last)
+end
+
+function G.remove(name, expectedScope)
+    if not readable(name) or not validName(name) then return "invalid_name" end
+    local current=currentState()
+    if not current or not readable(expectedScope) or expectedScope ~= current.token then return "unavailable" end
+    local first, last=revisionWindow()
+    if not first or currentState() ~= current or not ownsReady(current,expectedScope) then return "unavailable" end
+    local identity=N.Key(name)
+    local row=current.data.rows[identity]
+    if not row then return "missing" end
+    local prior=current.data.removed[identity]
+    local revision=nextRevision(first,last,prior and prior.rev)
+    if not revision then return "unavailable" end
+    local record={name=row.name,rev=revision,gone=true}
+    dropRow(current.data,identity)
+    forgetQueuedRow(current,identity)
+    putRecord(current.data,identity,record)
+    current.pushRemoved[identity],current.snapshotRemoved[identity]=record,nil
+    publish(current)
+    schedule(current)
+    notify()
+    return "removed"
+end
+
+local function readRecords(payload, lastRevision)
+    local records, seen={},{}
+    for item in (payload.."|"):gmatch("([^|]*)|") do
+        local digits, flag, name=item:match("^(%d+),([01]),(.+)$")
+        if not digits or not validName(name) or seen[name] then return end
+        seen[name]=true
+        local rev=#digits <= 12 and tonumber(digits)
+        if integer(rev,lastRevision) then
+            local identity=N.Key(name)
+            local record={name=name,rev=rev,gone=flag == "1"}
+            if supersedes(record,records[identity]) then records[identity]=record end
+        end
+    end
+    if next(records) then return records end
 end
 
 local function readEntries(payload, lastRevision)
@@ -491,10 +626,11 @@ local function readEntries(payload, lastRevision)
     if next(entries) then return entries end
 end
 
-local function responsePacket(current, queue)
-    local payload, sent="E|"..current.key,{}
+local function responsePacket(current, queue, removal)
+    local payload, sent=(removal and "X|" or "E|")..current.key,{}
     for identity, row in pairs(queue) do
-        local item=string.format("|%s,%.0f,%s",row.class or "",row.rev,row.name)
+        local item=removal and string.format("|%.0f,%d,%s",row.rev,row.gone and 1 or 0,row.name)
+            or string.format("|%s,%.0f,%s",row.class or "",row.rev,row.name)
         if #payload+#item > MAX_PACKET then break end
         payload=payload..item
         sent[identity]=row
@@ -513,6 +649,8 @@ local function startSnapshot(current, at)
     current.followupAt=nil
     current.retries.snapshot=nil
     current.retries.snapshotDetails=nil
+    current.retries.snapshotRemoved=nil
+    for identity, record in pairs(current.data.removed) do current.snapshotRemoved[identity]=record end
     for identity, row in pairs(current.data.rows) do
         current.snapshot[identity]=row
         if row.reasonIds or row.note then current.snapshotDetails[identity]={row=row} end
@@ -522,7 +660,11 @@ local function startSnapshot(current, at)
 end
 
 local function hasSnapshot(current)
-    return next(current.snapshot) or next(current.snapshotDetails)
+    return next(current.snapshotRemoved) or next(current.snapshot) or next(current.snapshotDetails)
+end
+
+local function hasPush(current)
+    return next(current.pushRemoved) or next(current.push) or next(current.pushDetails)
 end
 
 local function rememberRequest(current, nonce)
@@ -589,9 +731,11 @@ local function flush(current)
     if not ownsReady(current,token) then return end
     if at < nextSend then schedule(current); return end
     if not hasSnapshot(current) and current.followupAt and at >= current.followupAt then startSnapshot(current,at) end
-    local route, queue, payload, sent, pullKind, details, pullSample
+    local route, queue, payload, sent, pullKind, details, pullSample, removal
     local ackSender, ack=nextAck(current,at)
-    if next(current.push) then
+    if next(current.pushRemoved) then
+        route,queue,removal="pushRemoved",current.pushRemoved,true
+    elseif next(current.push) then
         route,queue="push",current.push
     elseif current.retries.pull or current.pullAt and at >= current.pullAt then
         route="pull"
@@ -605,6 +749,8 @@ local function flush(current)
         route,payload="ack","A|"..current.key.."|"..ack.nonce
     elseif next(current.pushDetails) then
         route,queue,details="pushDetails",current.pushDetails,true
+    elseif next(current.snapshotRemoved) and at >= current.replyAt then
+        route,queue,removal="snapshotRemoved",current.snapshotRemoved,true
     elseif next(current.snapshot) and at >= current.replyAt then
         route,queue="snapshot",current.snapshot
     elseif next(current.snapshotDetails) and at >= current.replyAt then
@@ -627,7 +773,7 @@ local function flush(current)
     elseif queue then
         -- Retry only the still-owned rows from this packet. Newly queued rows have their own budget.
         if pending and not onlyQueuedRows(queue,pending.rows) then pending=nil end
-        payload,sent=responsePacket(current,pending and pending.rows or queue)
+        payload,sent=responsePacket(current,pending and pending.rows or queue,removal)
     elseif pending and not pullSample then
         payload=pending.payload
     elseif route == "pull" then
@@ -642,7 +788,7 @@ local function flush(current)
             rememberRequest(current,nonce)
         end
         current.nonce=nonce -- Install echo ownership before the synchronous native call.
-        local command=pullKind == "announce" and current.data.count > 0 and "H" or "Q"
+        local command=pullKind == "announce" and (current.data.count > 0 or next(current.data.removed)) and "H" or "Q"
         payload=command.."|"..current.key.."|"..nonce
     end
 
@@ -714,7 +860,7 @@ function schedule(current)
     if recovering then
         if current.timerFault then return end
         local attempts=current.recoveryAttempts or 0
-        if (next(current.push) or next(current.pushDetails) or pullDue or reply) and attempts < 3 then
+        if (hasPush(current) or pullDue or reply) and attempts < 3 then
             due=at+2^(1+attempts)
         end
         if current.sendRecoveryAt and at < current.sendRecoveryAt then
@@ -725,7 +871,7 @@ function schedule(current)
             due,replyCheckpoint=reply,true
         end
     else
-        due=(next(current.push) or next(current.pushDetails)) and 0 or pullDue
+        due=hasPush(current) and 0 or pullDue
         if reply then due=math.min(due or math.huge,reply) end
         local _, ack=nextAck(current,at)
         if ack then due=math.min(due or math.huge,ack.due) end
@@ -802,7 +948,7 @@ local function receive(prefix, message, channel, sender)
     if not readable(prefix) or prefix ~= PREFIX or not readable(channel) or channel ~= CHANNEL or not readable(message)
         or type(message) ~= "string" or #message > MAX_PACKET or not readable(sender) or type(sender) ~= "string"
         or sender == "" or #sender > 256 or sender:find("\000",1,true) then return end
-    local command, key, payload=message:match("^([HQEDA])|([^|]+)|(.+)$")
+    local command, key, payload=message:match("^([HQEDAX])|([^|]+)|(.+)$")
     if not command then return end
     local current, _, changed=currentState()
     local token=current and current.token
@@ -832,6 +978,34 @@ local function receive(prefix, message, channel, sender)
         if current.followupAt then schedule(current) end
         return
     end
+    if command == "X" then
+        local _, last=revisionWindow()
+        local records=last and readRecords(payload,last)
+        if not records or currentState() ~= current or not ownsReady(current,token) then return end
+        local updated=false
+        for identity, record in pairs(records) do
+            for _, queue in ipairs({current.pushRemoved,current.snapshotRemoved}) do
+                if queue[identity] and not supersedes(queue[identity],record) then queue[identity]=nil end
+            end
+            if supersedes(record,current.data.removed[identity]) and (db[current.key] or scopeCount < MAX_SCOPES) then
+                putRecord(current.data,identity,record)
+                -- At the cap an older record is evicted at once and must not drop the row, or a stale E restores it.
+                if current.data.removed[identity] == record then
+                    if record.gone then
+                        dropRow(current.data,identity)
+                        forgetQueuedRow(current,identity)
+                    end
+                    updated=true
+                end
+            end
+        end
+        if updated then
+            publish(current)
+            notify()
+        end
+        if current.followupAt then schedule(current) end
+        return
+    end
     if command ~= "E" then
         if #payload > 24 or not payload:match("^%d+%.%d+$") or payload == current.nonce then return end
         for _, nonce in ipairs(current.requests) do if nonce == payload then return end end
@@ -847,7 +1021,7 @@ local function receive(prefix, message, channel, sender)
             current.pullKind="query"
             schedule(current)
         end
-        if current.data.count == 0 or not ownsReady(current,token) then return end
+        if current.data.count == 0 and not next(current.data.removed) or not ownsReady(current,token) then return end
         local stagger=0.5+math.random()*3
         if hasSnapshot(current) or current.lastReply and at-current.lastReply < REPLY_INTERVAL then
             current.followupAt=current.followupAt or current.lastReply+REPLY_INTERVAL+stagger
