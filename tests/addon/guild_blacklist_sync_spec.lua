@@ -2261,6 +2261,53 @@ do
     check(count==33,"upgrading erases no saved list")
 end
 
+-- A character waiting for its old guild's erase still keeps the guild it is in.
+do
+    local b=bus()
+    local db=guildCache({[ME]="3:101",["3:First Alt"]="3:303"})
+    local a=b:client("Guild Member",{shared=db,guild=303})
+    b:advance(10)
+    check(member(db)=="3:101" and db.joined[ME]=="3:303","the new guild is noted while the old one awaits its erase")
+    a.online=false
+    local alt=b:client("First Alt",{shared=db,character="First Alt",guild=false})
+    b:advance(301)
+    check(db.scopes["3:303"] and member(db,"3:First Alt")==nil,"an alt leaving cannot erase the noted guild")
+    alt.online=false
+    b:client("Guild Member",{shared=db,guild=303})
+    b:advance(301)
+    check(db.scopes["3:101"]==nil and member(db)=="3:303" and db.joined[ME]==nil,
+        "after the old guild's erase the new one is recorded and the note is gone")
+end
+
+do
+    local b=bus()
+    local db=guildCache({[ME]="3:101"})
+    local a=b:client("Guild Member",{shared=db,guild=303})
+    b:advance(10)
+    check(db.joined[ME]=="3:303","setup: new guild noted")
+    relog(b,a,db,{guild=101})
+    b:advance(1)
+    check(db.joined[ME]==nil and member(db)=="3:101","reading the old guild again drops the note")
+end
+
+for _, bad in ipairs({5,"text",{[ME]="4:303"},{[ME]=true}}) do
+    local b=bus()
+    local db=guildCache({["3:First Alt"]="3:303"})
+    db.joined=bad
+    b:client("First Alt",{shared=db,character="First Alt",guild=false})
+    b:advance(301)
+    check(db.scopes["3:303"]==nil and db.scopes["3:101"],"a bad note keeps nothing and the save still loads")
+end
+
+do
+    local b=bus()
+    local db=fullCache({["3:Other Alt"]="3:101"})
+    db.joined={["3:Other Alt"]="3:117"}
+    local a=b:client("Noted Cache",{shared=db,guild=202})
+    check(a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared" and db.scopes["3:117"] and scopes(db)==64,
+        "a noted guild's list is not erased to make room")
+end
+
 -- The count line follows each new guildmate while the sample is still collecting.
 do
     local b=bus()
