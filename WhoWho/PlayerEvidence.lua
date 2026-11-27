@@ -21,12 +21,6 @@ local function classToken(value)
     if readable(value) and type(value) == "string" and value:match("^[A-Z]+$") then return value end
 end
 
-local function classForID(id)
-    if positiveInteger(id) then
-        return classToken(member(read(member(C_CreatureInfo, "GetClassInfo"), id), "classFile"))
-    end
-end
-
 function evidence.classForGuid(guid)
     local profile = GetPlayerInfoByGUID
     if not reader.playerGuid(guid) or not readable(profile) or type(profile) ~= "function" then return end
@@ -94,7 +88,7 @@ local function recentEvidence(name, region, owns)
         local character = member(row, "characterData")
         local guid = member(character, "guid")
         if member(character, "fullName") == name and reader.playerGuid(guid) then
-            local class, level = classForID(member(character, "classID")), positiveInteger(member(character, "level"))
+            local class, level = reader.classForID(member(character, "classID")), positiveInteger(member(character, "level"))
             local state = online(member(member(row, "stateData"), "isOnline"))
             if ready() then return guid, class, level, state end
         end

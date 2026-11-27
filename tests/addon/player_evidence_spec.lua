@@ -284,4 +284,11 @@ do
     assert(not assert(cached("Secret Profile")).class, "unreadable native classes remain unknown")
     assert(publications == 0 and native.forbiddenCalls == 0)
 end
+do
+    local secret, classFile = sim.secret, "MAGE"
+    e.C_CreatureInfo.GetClassInfo = function() return {classFile=classFile} end
+    assert(A.unitReader.classForID(8) == "MAGE" and not A.unitReader.classForID(0) and not A.unitReader.classForID(1.5))
+    classFile = secret
+    assert(A.unitReader.classForID(8) == nil, "hidden class token is ignored")
+end
 print("RESULT shared player evidence and passive chat passed in simulation")

@@ -149,12 +149,7 @@ local function recent(record, hintOnly, stronger)
     local level, classID
     if not hintOnly and type(online) == "boolean" then level, classID = member(character, "level"), member(character, "classID") end
     if type(level) ~= "number" or level ~= level or level < 1 or level == math.huge or level % 1 ~= 0 then level = nil end
-    local class
-    if type(classID) == "number" and classID == classID and classID > 0 and classID ~= math.huge and classID % 1 == 0 then
-        local info = read(member(C_CreatureInfo, "GetClassInfo"), classID)
-        local token = member(info, "classFile")
-        if type(token) == "string" and token:match("^[A-Z]+$") then class = token end
-    end
+    local class = reader.classForID(classID)
     local stamp = read(GetServerTime)
     if read(GetCurrentRegion) ~= region or conflict(record, region, name, guid)
         or member(character, "fullName") ~= name or member(character, "guid") ~= guid then return unavailable end
@@ -192,11 +187,6 @@ end
 local function validLevel(level)
     if type(level) == "number" and level == level and level >= 1 and level < math.huge and level % 1 == 0 then return level end
 end
-local function classForID(id)
-    if type(id) ~= "number" or id ~= id or id <= 0 or id >= math.huge or id % 1 ~= 0 then return nil end
-    local token = member(read(member(C_CreatureInfo, "GetClassInfo"), id), "classFile")
-    if type(token) == "string" and token:match("^[A-Z]+$") then return token end
-end
 local function publishRoster(record, source, guid, online, class, level, validate, hint, stronger)
     local observedClass, observedLevel = class, level
     if stronger and stronger.class then observedClass = nil end
@@ -226,15 +216,11 @@ end
 local function group(record, missingMetadata)
     local store = A.store
     if missingMetadata and not inContext(record.region) then return end
-    local raid = read(IsInRaid)
-    if type(raid) ~= "boolean" then return outcome("group-unavailable", "Group data unavailable for this Friend.") end
-    local countReader = GetNumSubgroupMembers
-    if raid then countReader = GetNumGroupMembers end
-    local count = read(countReader)
-    if type(count) ~= "number" or count ~= count or count % 1 ~= 0 or count < 0 or count > (raid and 40 or 4) then return outcome("group-unavailable", "Group data unavailable for this Friend.") end
+    local prefix, count, source = reader.groupRoster()
+    if not prefix then return outcome("group-unavailable", "Group data unavailable for this Friend.") end
     local match, matchGuid, unreadable
     for i=1,count do
-        local unit = (raid and "raid" or "party") .. i
+        local unit = prefix .. i
         local exists = read(UnitExists, unit)
         local self = read(UnitIsUnit, unit, "player")
         if exists == nil or (exists == true and self == nil) then unreadable = true end
@@ -255,15 +241,15 @@ local function group(record, missingMetadata)
         if unreadable then return outcome("unavailable", "Group data unavailable for this Friend.") end
         return outcome("absent")
     end
-    local source = raid and "Raid" or "Party"
     if conflict(record, record.region, record.fullName, matchGuid) then return outcome("conflict", source .. " identity conflicts with the saved Friend.") end
     local function sameGroup()
-        return read(IsInRaid) == raid and read(countReader) == count
+        local livePrefix, liveCount = reader.groupRoster()
+        return livePrefix == prefix and liveCount == count
     end
     local function validate()
         if not inContext(record.region) or not sameGroup() or A.store ~= store then return false end
         for i=1,count do
-            local unit = (raid and "raid" or "party") .. i
+            local unit = prefix .. i
             if unit ~= match and read(UnitExists, unit) == true and read(UnitIsUnit, unit, "player") == false
                 and reader.identitySafe(unit) and reader.name(unit) == record.fullName then return false end
         end
@@ -391,7 +377,7 @@ local function guild(record, hintOnly, stronger)
         return nil, true
     end
     local online = guildRead.online(row)
-    local class, level = classForID(member(row, "classID")), validLevel(member(row, "level"))
+    local class, level = reader.classForID(member(row, "classID")), validLevel(member(row, "level"))
     if online == nil and not class and not level then
         local stamp = read(GetServerTime)
         if type(stamp) == "number" and stamp == stamp and stamp >= 0 and stamp < math.huge then
