@@ -1895,6 +1895,14 @@ end
 
 do
     local b,a,db=recorded()
+    relog(b,a,db,{guild=303})
+    b:advance(61)
+    check(erased(db) and member(db)=="3:303",
+        "an offline move to a listed guild erases the old list before recording the new one")
+end
+
+do
+    local b,a,db=recorded()
     local start=#b.packets
     guildEvent(a,202)
     check(kept(db),"an unsettled guild change keeps the list")
