@@ -259,4 +259,43 @@ do
     check(A.records[1].class=="MAGE","a plate during the first Friend's save is read")
 end
 
+-- Expired party state is dropped at the next roster read; entries inside their window stay.
+do
+    local _,s,e=fresh()
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return 0 end
+    local scan=upvalue(upvalue(s.observer:GetScript("OnEvent"),"sample"),"scan")
+    local party=upvalue(scan,"party")
+    local function owns() return true end
+    party.track(100,owns)
+    for _,case in ipairs({{"known",5},{"alerted",5},{"bypassed",30}}) do
+        local state,window=party[case[1]],case[2]
+        state.inside,state.expired=100-window+1,100-window
+        party.track(100,owns)
+        check(state.inside~=nil,"party "..case[1].." keeps an entry inside its window")
+        check(state.expired==nil,"party "..case[1].." drops an expired entry")
+    end
+end
+
+-- Only a sighting that could conflict copies its record.
+do
+    local _,s,_,A=fresh()
+    for i=1,20 do
+        local name,guid=person(i)
+        s:add(name,nil,"friend")
+        s:plate("nameplate"..i,name,guid)
+    end
+    local conflict=upvalue(A.targetCheck.observeNameplate,"conflict")
+    local record=A.store.get(1)
+    local name,guid=person(1)
+    local _,other=person(2)
+    local get,gets=A.store.get,0
+    A.store.get=function(id) gets=gets+1; return get(id) end
+    check(conflict(record,3,name,guid)==false,"20 distinct sightings do not conflict")
+    bound("20 sightings, no conflict, store.get calls",gets,0)
+    gets=0
+    check(conflict(record,3,name,other)==true,"another Friend's GUID conflicts")
+    bound("20 sightings, shared GUID, store.get calls",gets,1)
+end
+
 print("RESULT perf "..count.." passed 0 failed")
