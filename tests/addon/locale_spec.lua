@@ -302,6 +302,11 @@ local choices={
     {"umber","Terre d’ombre","Umber",{"1A1714","1A1714","2A241F","2A241F","352A22","352A22","C29A7C","C9A183","221810","857264","857264"},"2A241F"},
 }
 local roles={"background","panel","header","raised","selected","friendSelected","selectedRule","copper","ink","controlBorder","controlTrack"}
+local extraRoles={"noteInset","hover","pressed","selectedHover","selectedPressed","selection","teal","copperHover","copperPressed"}
+local extras={
+    graphite={"202223","2D2F32","151617","373B3F","222426","4A5057","C5CCD3","E3E6E9","BCC1C6"},
+    umber={"221D19","312923","151210","3E3128","271F19","5A4334","C29A7C","D7B398","AF8A6F"},
+}
 local function rgb(hex)
     return {tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255,1}
 end
@@ -326,6 +331,7 @@ local function checkSwatches(shell)
         assert(button:IsVisible() and not button.label and button:GetWidth()==30 and button:GetHeight()==30)
         assert(circle:GetWidth()==20 and circle:GetHeight()==20 and circle:GetPoint()=="CENTER")
         assert(button.ring:GetWidth()==26 and button.ring:GetHeight()==26 and button.ring:GetPoint()=="CENTER")
+        assert(button.mark:GetWidth()==12 and button.mark:GetHeight()==12)
         assert(not previousX or (x-previousX==38 and y==previousY))
         assert(x+button:GetWidth()+24<=shell.settings:GetWidth())
         assert(p.interfaceColors[index].id==choice[1])
@@ -408,6 +414,7 @@ for _,choice in ipairs(choices) do
         assert(swatch:GetChecked()==(key==id) and swatch.mark:IsShown()==(key==id))
     end
     for index,role in ipairs(roles) do sameColor(colors[role],rgb(choice[4][index])) end
+    for index,hex in ipairs(extras[id] or {}) do sameColor(colors[extraRoles[index]],rgb(hex)) end
     if original then sameColor(canvas.vertexColor,{1,1,1,1})
     else checkMaterialTint(canvas,"1C2225",colors.background) end
     sameColor(listPanel.color,colors.panel)
