@@ -1,0 +1,36 @@
+name: Label from branch
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    # Fork PRs get a read-only token, so they cannot be labelled here.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const labels = { 'feature/': 'feature', 'fix/': 'bug', 'chore/': 'chore' };
+            const match = Object.keys(labels).find((prefix) => branch.startsWith(prefix));
+            if (!match) {
+              core.info(`No label configured for branch "${branch}".`);
+              return;
+            }
+            const existing = context.payload.pull_request.labels.map(({ name }) => name);
+            if (existing.includes(labels[match])) {
+              return;
+            }
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: [labels[match]],
+            });
