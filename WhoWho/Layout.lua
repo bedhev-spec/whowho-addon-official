@@ -27,7 +27,7 @@ end
 function S.RosterRowCount()
     local width=S.list:GetWidth()
     local guild=S.section=="guildBlacklist"
-    local blacklist=P.manual and (guild or S.section=="blacklist")
+    local blacklist=guild or S.section=="blacklist"
     if width~=headerWidth or S.section~=headerSection or S.facetLayoutDirty then
         headerWidth,headerSection=width,S.section
         S.facetLayoutDirty=false
@@ -39,12 +39,12 @@ function S.RosterRowCount()
         local titleHeight=math.max(headerHeight,math.ceil(S.pageTitle:GetStringHeight()))
         S.pageTitle:SetHeight(titleHeight)
         S.pageTitle:SetJustifyV("MIDDLE")
-        local rowInset=P.manual and 15 or headerTop
+        local rowInset=15
         at(S.pageTitle,24,rowInset)
         S.addButton:ClearAllPoints()
         S.addButton:SetPoint("TOPRIGHT",-24,-rowInset-(titleHeight-S.addButton:GetHeight())/2)
         local bandHeight=titleHeight+2*rowInset
-        local searchTop=P.manual and bandHeight+14 or math.max(78,headerTop+titleHeight+10)
+        local searchTop=bandHeight+14
         local inline=S.facetLinks and (S.section=="friend" or S.section=="blacklist")
         if inline and S.section=="friend" then
             S.refreshButton:ClearAllPoints()
@@ -60,7 +60,7 @@ function S.RosterRowCount()
             at(S.guildPeers,24,searchTop)
             searchTop=searchTop+math.max(16,math.ceil(S.guildPeers:GetStringHeight()))+10
         end
-        S.rosterHeader:SetHeight(P.manual and bandHeight or searchTop-13)
+        S.rosterHeader:SetHeight(bandHeight)
         at(S.searchBox,24,searchTop)
         S.filterToggle:ClearAllPoints(); S.filterToggle:SetPoint("TOPRIGHT",-24,-searchTop)
         local sortTop=searchTop+40
@@ -94,9 +94,9 @@ function S.ArrangeRoster()
     local width=S.list:GetWidth()
     local cramped=width<535
     local guild=S.section=="guildBlacklist"
-    local blacklist=P.manual~=nil and (guild or S.section=="blacklist")
+    local blacklist=guild or S.section=="blacklist"
     local compactCount=width<490 or (blacklist and width-200-S.pageTitle:GetWidth()<144)
-    local favoriteInset=P.manual and S.section=="friend" and 30 or 0
+    local favoriteInset=S.section=="friend" and 30 or 0
     local presenceX=math.min(math.floor((width-48)*0.542)+24,width-309)
     if not cramped and not blacklist then
         for _,row in ipairs(S.rows) do
@@ -125,18 +125,14 @@ function S.ArrangeRoster()
     if compactCount and not (S.facetLinks and S.section=="friend") then S.count:SetPoint("BOTTOMLEFT",24,actionInset)
     elseif S.facetLinks and S.section=="friend" and width<590 then S.count:SetPoint("LEFT",S.refreshButton,"RIGHT",10,0)
     else S.count:SetPoint("LEFT",S.pageTitle,"RIGHT",16,0) end
-    if S.refreshLabel then S.refreshLabel:SetShown(not compactCount) end
-    for i,row in ipairs(S.rows) do
-        if not P.manual then at(row,18,rowTop+(i-1)*rowPitch) end
+    for _,row in ipairs(S.rows) do
         row:SetSize(width-36,rowPitch)
-        local nameWidth=(cramped and width-(P.manual and 172 or 144) or presenceX-54)-favoriteInset
+        local nameWidth=(cramped and width-172 or presenceX-54)-favoriteInset
         if blacklist then nameWidth=width-(guild and 108 or 180) end
         row.name:SetWidth(nameWidth); row.note:SetWidth(nameWidth)
-        if P.manual then
-            at(row.name,22+favoriteInset,blacklist and 15 or 9)
-            at(row.note,22+favoriteInset,blacklist and 44 or 54)
-            row.meta:ClearAllPoints(); row.meta:SetPoint("LEFT",22+favoriteInset,0)
-        end
+        at(row.name,22+favoriteInset,blacklist and 15 or 9)
+        at(row.note,22+favoriteInset,blacklist and 44 or 54)
+        row.meta:ClearAllPoints(); row.meta:SetPoint("LEFT",22+favoriteInset,0)
         row.note:SetShown(blacklist or not cramped)
         row.status:SetShown(not blacklist)
         row.role:SetShown(true)
@@ -146,7 +142,7 @@ function S.ArrangeRoster()
         row.arrangedStatusGlyph=hasGlyph
         local glyphSpace=20+(cramped and 3 or 2)
         row.status:SetPoint("LEFT",(cramped and 45 or presenceX+4)-(hasGlyph and 0 or glyphSpace),presenceY)
-        row.status:SetPoint("RIGHT",P.manual and row.inviteButton or row.copyButton,"LEFT",-16,presenceY)
+        row.status:SetPoint("RIGHT",row.inviteButton,"LEFT",-16,presenceY)
         row.statusIcon:ClearAllPoints()
         row.statusIcon:SetPoint("RIGHT",row.status,"LEFT",cramped and -3 or -2,0)
         P.Type(row.status,cramped and "meta" or "body")
@@ -280,7 +276,7 @@ function S.ArrangeRecordText()
     local width=S.details:GetWidth()-50
     local shift=S.layoutMode=="compact" and 53 or 0
     local slim=S.details:GetWidth()<350
-    local friends=P.manual and S.section=="friend"
+    local friends=S.section=="friend"
     local nameWidth=friends and width-38 or width
     local nameInset=friends and 26 or 25
     nameWidth=nameWidth-(nameInset-25)
@@ -288,37 +284,8 @@ function S.ArrangeRecordText()
     local nameHeight=math.max(1,math.min(57,math.ceil(d.name:GetStringHeight())))
     local nameY=headerTop+shift+math.max(0,(headerHeight-nameHeight)/2)
     at(d.nameView,nameInset,nameY); textViewport(d.nameView,d.name,nameWidth,nameHeight)
-    S.blacklistDetailsBackground:SetShown(P.manual~=nil); S.detailsPaper:SetShown(P.manual==nil)
-    if P.manual then arrangeManualDetail(d,width,nameY,nameHeight,nameWidth); return end
-    local divider,notesDivider
-    local values=S.layoutMode=="compact" and 136 or 116
-    local valueWidth=S.details:GetWidth()-values-18
-    d.observation:SetWidth(valueWidth); d.observation:SetWordWrap(slim)
-    d.note:SetWidth(width)
-    local metaY=math.max(63+shift,nameY+nameHeight+3)
-    at(d.meta,25,metaY)
-    divider=metaY+math.max(18,d.meta:GetStringHeight(),d.role:GetStringHeight())+18
-    if d.affiliation and d.affiliation:IsShown() then
-        d.affiliation:SetWidth(width); d.affiliation:SetWordWrap(true)
-        at(d.affiliation,25,divider-11)
-        divider=divider+math.ceil(d.affiliation:GetStringHeight())+5
-    end
-    local extra=slim and 23 or 0
-    at(d.heading,25,divider+17)
-    S.checkStatus:ClearAllPoints(); S.checkStatus:SetPoint("TOPRIGHT",-25,-divider-(slim and 49 or 14))
-    at(d.current,d.statusIcon:IsShown() and 49 or 25,divider+52)
-    at(d.observationLabel,25,divider+88); at(d.observation,values,divider+87)
-    local attemptY=divider+113+extra
-    at(d.attemptLabel,25,attemptY+1); at(d.attempt,values,attemptY)
-    d.attempt:SetWidth(valueWidth); d.attempt:SetWordWrap(true)
-    notesDivider=attemptY+math.max(46,math.ceil(d.attempt:GetStringHeight())+12)
-
-    detailRule(d.rule1,divider); detailRule(d.rule2,notesDivider)
-    at(d.noteLabel,25,notesDivider+16)
-    local noteY=notesDivider+46
-    local noteBottom=S.savedOutside and 479 or D.paneHeight-actionInset-46
-    at(d.noteView,25,noteY); textViewport(d.noteView,d.note,width,math.max(1,noteBottom-noteY))
-    d.noteEdge:Hide(); d.noteFill:Hide()
+    S.blacklistDetailsBackground:SetShown(true); S.detailsPaper:SetShown(false)
+    arrangeManualDetail(d,width,nameY,nameHeight,nameWidth)
 end
 
 function S.Layout()
@@ -370,10 +337,6 @@ function S.Layout()
 
     if not S.facetLinks then
         S.refreshButton:ClearAllPoints(); S.refreshButton:SetPoint("BOTTOMRIGHT",-24,actionInset)
-    end
-    if S.refreshLabel then
-        S.refreshLabel:ClearAllPoints(); S.refreshLabel:SetPoint("BOTTOMLEFT",24,actionInset)
-        S.refreshLabel:SetHeight(34); S.refreshLabel:SetJustifyV("MIDDLE")
     end
     S.editButton:ClearAllPoints(); S.editButton:SetPoint("BOTTOMLEFT",25,actionInset)
     if S.moveButton then

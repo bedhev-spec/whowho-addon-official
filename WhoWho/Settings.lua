@@ -194,7 +194,7 @@ function P.CreateSettings(window,S)
     local bannerHelp=label("Drag the test banner to set its position. Live alerts are click-through.","small",C.muted,alerts)
     bannerHelp:SetWordWrap(true)
     S.testBannerButton=P.Button(alerts,L("Hide test banner"),140,34,B.toggleTest)
-    if P.manual then P.RoundButton(S.testBannerButton) end
+    P.RoundButton(S.testBannerButton)
     local hideBannerWidth=S.testBannerButton.label:GetUnboundedStringWidth()
     syncBannerButton()
     S.testBannerButton:SetWidth(math.max(140,math.ceil(math.max(hideBannerWidth,S.testBannerButton.label:GetUnboundedStringWidth()))+16))
@@ -211,14 +211,10 @@ function P.CreateSettings(window,S)
     local audioTitle=label("Sound","section",nil,alerts)
     local volume=label("Volume","body",C.body,alerts)
     local refreshTitle=label("Automatic Friends refresh","section",nil,friends)
-    local presenceNote,tooltipTitle,tooltipRow,audioRow,bookTitle,deleteRow,colorTitle
+    local tooltipTitle,tooltipRow,audioRow,bookTitle,deleteRow,colorTitle
     local muteTitle,muteRows,guildBlacklistRow,guildStatusNotice,worldSightingsTitle,nameplateRow
-    if not P.manual then
-        presenceNote=label("Status checks are unavailable in this preview.","small",C.muted,friends)
-        presenceNote:SetWordWrap(true)
-    end
     local refreshRows={}
-    if P.manual then
+    do
         local A=P.manual
         colorTitle=label("Interface color","section",nil,general)
         S.interfaceColorChoices={}
@@ -377,12 +373,6 @@ function P.CreateSettings(window,S)
         P.Tooltip(deleteRow.control,L("Guild Blacklist deletion is always confirmed."))
         deleteRow.control:HookScript("OnHide",P.HideTooltip)
     end
-    local audioNote
-    if not P.manual then
-        audioNote=label("Audio playback is unavailable in this preview.","small",C.muted,alerts)
-        audioNote:SetWordWrap(true)
-        S.volumeSlider=slider(alerts,false); S.volumeSlider:SetMinMaxValues(0,1); S.volumeSlider:SetValueStep(.05)
-    end
 
     function pane:Arrange(width)
         local x=24
@@ -458,17 +448,11 @@ function P.CreateSettings(window,S)
         local audioY=opacityY+46
         position(audioTitle,x,audioY)
         local audioBottom
-        if audioRow then
+        do
             local volumeY=arrangeToggle(audioRow,audioY+30)+8
             local buttonX=right-S.testSoundButton:GetWidth()
             local volumeEnd=arrangeSlider(volume,S.volumeSlider,S.volumeLabel,volumeY,buttonX-8)
             position(S.testSoundButton,volumeEnd+8,volumeY)
-            audioBottom=volumeY+34
-        else
-            position(audioNote,x,audioY+30); audioNote:SetWidth(content)
-            local volumeY=audioY+30+math.ceil(audioNote:GetStringHeight())+8
-            position(volume,x,volumeY+4)
-            position(S.volumeSlider,right-160,volumeY); S.volumeSlider:SetWidth(160)
             audioBottom=volumeY+34
         end
 
@@ -490,9 +474,6 @@ function P.CreateSettings(window,S)
         position(refreshTitle,x,groupY)
         local refreshY=rowY
         for _,row in ipairs(refreshRows) do refreshY=arrangeToggle(row,refreshY)+4 end
-        if presenceNote then
-            position(presenceNote,x,refreshY); presenceNote:SetWidth(content)
-        end
 
         local windowY,scaleY=groupY-contentTop,rowY-contentTop
         local generalBottom=scaleY+32

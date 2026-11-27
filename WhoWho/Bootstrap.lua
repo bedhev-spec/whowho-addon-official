@@ -27,7 +27,7 @@ local function stopRelog()
     unregister("PLAYER_REGEN_ENABLED")
     for event in pairs(relogEvents) do unregister(event) end
 end
-if P.manual then
+do
     local A = P.manual
     local function automaticSetting(key,events,available,onChanged)
         local enabled, generation, changing = false, 0, false
@@ -119,16 +119,16 @@ function P.SetInterfaceColor(value)
 end
 function P.Init()
     if P.initialized then return end
-    if P.manual and not P.addonLoaded then return end
+    if not P.addonLoaded then return end
     if type(WhowhoPreviewDB) ~= "table" then WhowhoPreviewDB={} end
     local old=WhowhoPreviewDB
     local scale=clampScale(old.scale)
     local angle=finite(old.minimapAngle) and old.minimapAngle % 360 or 225
-    local automaticTarget=P.manual and old.automaticTarget~=false
-    local automaticMouseover=P.manual and old.automaticMouseover~=false
-    local automaticNameplates=P.manual and old.automaticNameplates~=false
-    local relogRefresh=P.manual and old.relogRefresh~=false
-    local skipDeleteConfirmation=P.manual and old.skipDeleteConfirmation==true
+    local automaticTarget=old.automaticTarget~=false
+    local automaticMouseover=old.automaticMouseover~=false
+    local automaticNameplates=old.automaticNameplates~=false
+    local relogRefresh=old.relogRefresh~=false
+    local skipDeleteConfirmation=old.skipDeleteConfirmation==true
     local position=old.position
     if type(position)~="table" or not points[position.point] or not points[position.relativePoint] or not finite(position.x) or not finite(position.y) then position=nil end
     WhowhoPreviewDB={scale=scale,minimapAngle=angle,position=position}; P.db=WhowhoPreviewDB
@@ -137,7 +137,7 @@ function P.Init()
     P.BlacklistBanner.setOpacity(old.bannerOpacity)
     P.db.bannerPosition=P.BlacklistBanner.savedPosition(old.bannerPosition)
     UIParent:HookScript("OnSizeChanged",P.BlacklistBanner.resize)
-    if P.manual then
+    do
         for _,key in ipairs({"automaticTarget","automaticMouseover","relogRefresh"}) do
             if old[key]==false then P.db[key]=false end
         end
@@ -157,7 +157,7 @@ function P.Init()
         P.manual.encounterLedger.init(WhowhoEncounterDB)
     end
     P.initialized=true
-    if P.manual then
+    do
         P.BlacklistBanner.installSightings()
         P.manual.playerEvidence.install()
         P.manual.playerMenu.install()
@@ -192,7 +192,7 @@ end
 function P.Toggle()
     -- A user-invoked slash command can expose the read-only error even when
     -- the secret checker is absent and the event's addon name cannot be read.
-    if P.manual and not P.addonLoaded and type(issecretvalue)~="function" then P.addonLoaded=true end
+    if not P.addonLoaded and type(issecretvalue)~="function" then P.addonLoaded=true end
     P.Init(); if P.initialized then P.Shell.Toggle() end
 end
 SLASH_WHOWHOPREVIEW1="/wwpreview"
@@ -266,21 +266,21 @@ end
 loader=CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:SetScript("OnEvent",function(self,event,addon,extra)
-    if P.manual and (event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_REGEN_DISABLED") then
+    if event=="PLAYER_LEAVING_WORLD" or event=="PLAYER_REGEN_DISABLED" then
         P.manual.whoLookup.cancel(event=="PLAYER_REGEN_DISABLED")
         return
     end
-    if P.manual and event=="PLAYER_TARGET_CHANGED" then
+    if event=="PLAYER_TARGET_CHANGED" then
         if inviteEvents[event] then P.manual.invite.invalidate() end
         if P.manual.targetCheck.onTargetChanged() or inviteEvents[event] then P.Shell.RefreshFriends() end
         return
     end
-    if P.manual and event=="UPDATE_MOUSEOVER_UNIT" then
+    if event=="UPDATE_MOUSEOVER_UNIT" then
         if inviteEvents[event] then P.manual.invite.invalidate(); P.Shell.RefreshFriends() end
         P.manual.targetCheck.onMouseoverChanged(P.Shell.RefreshFriends)
         return
     end
-    if P.manual and (event=="NAME_PLATE_UNIT_ADDED" or event=="NAME_PLATE_UNIT_REMOVED") then
+    if event=="NAME_PLATE_UNIT_ADDED" or event=="NAME_PLATE_UNIT_REMOVED" then
         local A,B=P.manual,P.BlacklistBanner
         local active,generation=A.automaticNameplatesEnabled()
         if not active then return end
@@ -298,11 +298,11 @@ loader:SetScript("OnEvent",function(self,event,addon,extra)
         if changed then P.Shell.RefreshFriends() end
         return
     end
-    if P.manual and (event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_REGEN_ENABLED" or relogEvents[event]) then
+    if event=="PLAYER_ENTERING_WORLD" or event=="PLAYER_REGEN_ENABLED" or relogEvents[event] then
         if event=="PLAYER_ENTERING_WORLD" then P.manual.whoLookup.enterWorld() end
         onRelogEvent(event,addon,extra)
         return
     end
-    if P.manual then addon=P.manual.text(addon) end
+    addon=P.manual.text(addon)
     if addon==addonName then P.addonLoaded=true; P.Init(); self:UnregisterEvent("ADDON_LOADED") end
 end)

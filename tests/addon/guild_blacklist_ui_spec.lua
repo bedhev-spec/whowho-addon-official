@@ -976,7 +976,6 @@ do
     local original=("é"):rep(257)
     local editor=p.EditorDialog.Create(S.window,{
         records={},
-        classEvidence={},
         setNameColor=function() end,
         onShow=function() end,
         onHide=function() end,

@@ -57,7 +57,7 @@ function P.CreateRosterFilters(list,S)
     S.filterToggle=P.Button(list,L("Filters"),124,36,function() if not S.scrim:IsShown() then S.filterMenu:SetShown(not S.filterMenu:IsShown()) end end); S.filterToggle:SetPoint("TOPRIGHT",-24,-78)
     P.ButtonIcon(S.filterToggle,"filter",20)
     S.filterMenu=CreateFrame("Frame","WhowhoPreviewFilterMenu",list); S.filterMenu:SetWidth(248); S.filterMenu:SetPoint("TOPRIGHT",S.filterToggle,"BOTTOMRIGHT",0,0); S.filterMenu:SetFrameLevel(list:GetFrameLevel()+10); P.PopupMaterial(S.filterMenu); S.filterMenu:Hide(); table.insert(UISpecialFrames,"WhowhoPreviewFilterMenu")
-    if P.manual then
+    do
         local edge,fill=P.NoteInset(S.filterMenu)
         edge:SetAllPoints(S.filterMenu)
         P.SetPaletteFill(fill,C.raised)
@@ -74,7 +74,7 @@ function P.CreateRosterFilters(list,S)
         for _,row in ipairs(S.rows) do P.RosterRows.ClearHover(row) end
     end)
     S.filterShield=P.DismissOutside(S.filterMenu,list)
-    if P.manual then S.facetLinks={} end
+    S.facetLinks={}
     S.filterMenu:HookScript("OnHide",function() S.hoverFacet=nil end)
     local function openFacet(link,key,hover)
         if S.scrim:IsShown() or not (S.section=="friend" or (S.section=="blacklist" and key=="classFilter")) then return end
