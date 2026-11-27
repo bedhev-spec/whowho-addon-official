@@ -496,6 +496,11 @@ local function publishShare(current, name, class, reasons, approvedNote, first, 
     local record, restored=current.data.removed[identity]
     -- shortcut: a restore does not date rows, so a peer that missed the removal can merge old reasons and note back; tie a row data revision to the restore.
     if record and record.gone then
+        -- Restoring now would overwrite the unsent removal, so peers would never learn of it.
+        local pending=current.pushRemoved[identity]
+        -- shortcut: the send queue is not saved, so a reload or guild change before the send still loses the removal for peers; persist pending removals if reported.
+        -- A flush can end without a timer, so the refusal re-arms the send it waits for.
+        if pending and pending.gone then schedule(current); return "unavailable" end
         local revision=nextRevision(first,last,record.rev)
         if not revision then return "unavailable" end
         restored={name=name,rev=revision,gone=false}

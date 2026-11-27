@@ -1102,6 +1102,103 @@ do
     assert(s.forbiddenCalls==0)
 end
 
+-- An open guild delete closes with its entry and never keeps input blocked.
+do
+    local p,s,_,S,state=fresh()
+    local function reset()
+        S.window:Show()
+        state.entries={{name="Alpha Stone"},{name="Bravo Stone"}}
+        state.status,state.scope,state.removeResult="ready","guild-a",nil
+        state.removes={}
+        S.deleteDialog:Hide()
+        S.RefreshGuildBlacklist()
+    end
+    local function open()
+        reset()
+        S.rows[1].deleteButton:Click()
+        assert(S.deleteDialog:IsShown() and S.scrim:IsShown())
+    end
+    local function unblocked(case)
+        assert(not S.deleteDialog:IsShown() and not S.scrim:IsShown() and not S.deleteTarget,case)
+    end
+    S.nav.guildBlacklist:Click()
+
+    open()
+    state.entries={{name="ALPHA STONE"},{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    assert(S.deleteDialog:IsShown(),"a spelling change keeps the same entry")
+    state.entries={{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    unblocked("a peer removal closes the dialog")
+    state.entries={{name="Alpha Stone"},{name="Bravo Stone"}}
+    S.RefreshGuildBlacklist()
+    S.deleteConfirm:Click()
+    assert(#state.removes==0 and #state.entries==2,"a re-added entry is not deleted by the closed dialog")
+    S.rows[2]:Click()
+    assert(S.selected.fullName=="Bravo Stone","rows stay clickable")
+    S.rows[1].deleteButton:Click()
+    assert(S.deleteDialog:IsShown() and S.deleteConfirm:IsEnabled())
+    S.deleteConfirm:Click()
+    assert(#state.removes==1 and #state.entries==1,"deleteBusy is released and a later delete works")
+    unblocked("own confirm closes through the synchronous notify")
+
+    open()
+    state.status,state.scope,state.entries="no_guild",nil,{}
+    S.RefreshGuildBlacklist()
+    unblocked("leaving the guild closes the dialog")
+
+    local close
+    for _,child in ipairs(S.deleteDialog.children) do
+        if child.kind=="Button" and child~=S.deleteConfirm and child~=S.deleteCancel then close=child end
+    end
+    local exits={
+        cancel=function() S.deleteCancel:Click() end,
+        close=function() close:Click() end,
+        window=function() S.window:Hide() end,
+    }
+    local conditions={
+        ready=function() end,
+        paused=function() state.status="unavailable" end,
+        settling=function() state.status,state.scope,state.entries="unavailable",nil,{} end,
+        failed=function() state.removeResult="unavailable"; S.deleteConfirm:Click() end,
+    }
+    for condition,apply in pairs(conditions) do
+        for exit,leave in pairs(exits) do
+            local case=condition.." "..exit
+            open()
+            apply()
+            S.RefreshGuildBlacklist()
+            assert(S.deleteDialog:IsShown(),case)
+            leave()
+            unblocked(case)
+            open()
+            S.deleteConfirm:Click()
+            assert(#state.removes==1,"a later delete works after "..case)
+            unblocked(case)
+        end
+    end
+
+    open()
+    state.removeResult="unavailable"
+    S.deleteConfirm:Click()
+    state.entries={}
+    S.RefreshGuildBlacklist()
+    assert(S.deleteDialog:IsShown() and S.deleteError:GetText()=="Deleting is unavailable.",
+        "the error state is not closed by the list")
+    S.deleteCancel:Click()
+    unblocked("error close")
+
+    for _,section in ipairs({"friend","blacklist"}) do
+        assert(p.manual.save(nil,section,"Kept "..section,"",nil,section=="blacklist" and {"other"} or nil))
+        S.nav[section]:Click()
+        S.rows[1].deleteButton:Click()
+        S.RefreshGuildBlacklist()
+        assert(S.deleteDialog:IsShown() and S.deleteTarget,"guild changes leave other delete dialogs open")
+        S.deleteCancel:Click()
+    end
+    assert(s.forbiddenCalls==0)
+end
+
 for _,locale in ipairs({"enUS","frFR"}) do
     local french=locale=="frFR"
     local p,s,e,S,state=fresh(nil,nil,locale)

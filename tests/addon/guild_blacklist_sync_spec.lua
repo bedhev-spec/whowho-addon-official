@@ -1612,5 +1612,114 @@ do
     check(not shared.scopes["3:101"] and not shared.removed,"removals cannot exceed the scope limit")
 end
 
+for _, outcome in ipairs({"sent","dropped"}) do
+    local b=bus()
+    local a=b:client("Quick Remover")
+    local peer=b:client("Watching Member")
+    b:advance(5)
+    local name="Quick Return"
+    local scope=a.g.context()
+    check(a.g.add(name,{"spam"},"Old note",scope)=="shared","a row precedes a quick re-add")
+    b:advance(10)
+    check(rows(peer)[name] and rows(peer)[name].note=="Old note","the peer holds the old details")
+    a.sendResult=function(message) return message:match("^X|") and 8 or 0 end
+    check(a.g.remove(name,scope)=="removed","the removal is queued behind a throttle")
+    b:advance(1)
+    local record=removed(a,name)
+    local rev,start=record.rev,#b.packets
+    check(a.g.add(name,{"fraud"},nil,scope)=="unavailable","a re-add waits for the unsent removal")
+    check(not rows(a)[name] and removed(a,name)==record and record.gone and record.rev==rev,
+        "a refused re-add changes no row or record")
+    if outcome=="sent" then a.sendResult=nil end
+    b:advance(30)
+    check(sentBy(b,a,start,"^[ED]|")==0 and sentBy(b,a,start,"^X|")>=1,"a refused re-add queues nothing")
+    check((rows(peer)[name]==nil)==(outcome=="sent"),"the queued removal still reaches the peer unless dropped")
+    a.sendResult=nil
+    check(a.g.add(name,{"fraud"},nil,scope)=="shared","a re-add restores once the removal left the queue: "..outcome)
+    b:advance(15)
+    if outcome=="sent" then
+        local entry=rows(peer)[name]
+        check(entry and #entry.reasonIds==1 and entry.reasonIds[1]=="fraud" and not entry.note
+            and removed(peer,name).gone==false,"the peer ends without the old reasons and note")
+    end
+end
+
+-- Every way a queued removal can stall ends, and the refused re-add works again.
+for _, path in ipairs({"throttled","failing","lockdown","timer fault","guild change","missed timer"}) do
+    local b=bus()
+    local a=b:client("Stalled Remover")
+    b:advance(5)
+    local name="Stalled Return"
+    check(a.g.add(name,{"spam"},nil,(a.g.context()))=="shared","a row precedes the stalled removal")
+    b:advance(10)
+    local attempts=0
+    if path=="throttled" or path=="failing" then
+        a.sendResult=function(message)
+            if message:match("^X|") then attempts=attempts+1; return path=="throttled" and 8 or 9 end
+            return 0
+        end
+    elseif path=="timer fault" then a.timerThrows=true end
+    check(a.g.remove(name,(a.g.context()))=="removed","the removal is accepted without waiting for a send: "..path)
+    local start=#b.packets
+    if path=="lockdown" then a.locked=true
+    elseif path=="guild change" then
+        a.guild=202; a.s:event("PLAYER_GUILD_UPDATE","player")
+    elseif path=="missed timer" then
+        local calls=0
+        a.e.GetTime=function()
+            calls=calls+1
+            if calls==2 then return nil end
+            return b.time
+        end
+    end
+    b:advance(120)
+    if path=="throttled" or path=="failing" then
+        check(attempts==3,"retries are exhausted: "..path)
+        a.sendResult=nil
+    elseif path=="lockdown" then
+        check(a.g.add(name,{"fraud"},nil,"stale")=="unavailable","a locked transport refuses the re-add")
+        a.locked=false
+    elseif path=="timer fault" then
+        check(a.g.context()==nil,"a timer fault leaves the whole transport unavailable")
+        a.timerThrows=false
+        a.s:event("PLAYER_ENTERING_WORLD",false,false)
+    elseif path=="guild change" then
+        a.guild=101; a.s:event("PLAYER_GUILD_UPDATE","player")
+        b:advance(5)
+    end
+    local result=a.g.add(name,{"fraud"},nil,(a.g.context()))
+    if path=="lockdown" or path=="timer fault" or path=="missed timer" then
+        check(result=="unavailable" and sentBy(b,a,start,"^X|")==0,"the removal is still queued: "..path)
+        b:advance(20)
+        check(sentBy(b,a,start,"^X|")>=1,"the queued removal is sent: "..path)
+        result=a.g.add(name,{"fraud"},nil,(a.g.context()))
+    end
+    check(result=="shared" and rows(a)[name],"the re-add works once the transport is usable: "..path)
+end
+
+-- Deletion never waits for the sync request or for its own send.
+do
+    local b=bus()
+    local a=b:client("Lonely Deleter")
+    b:advance(5)
+    check(a.g.add("Unanswered Subject",{"spam"},nil,(a.g.context()))=="shared","a row exists to delete")
+    b:advance(10)
+    a.sendResult=9
+    a.noEcho=true
+    a.p.Toggle()
+    local S=a.p.Shell
+    S.nav.guildBlacklist:Click()
+    b:advance(40)
+    a.sendResult=nil
+    S.RefreshGuildBlacklist()
+    b:advance(40)
+    a.sendResult=9
+    S.rows[1].deleteButton:Click()
+    check(S.deleteDialog:IsShown() and S.deleteConfirm:IsEnabled(),"the dialog does not wait for a sync reply")
+    S.deleteConfirm:Click()
+    check(not S.deleteDialog:IsShown() and not S.scrim:IsShown() and not rows(a)["Unanswered Subject"],
+        "confirm gives its result at once, with no reply and a failing send")
+end
+
 check(H.forbiddenCalls==0,"the fake bus never invokes real native actions")
 print(string.format("RESULT guild-blacklist-sync %d passed",count))
