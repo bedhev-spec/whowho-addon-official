@@ -25,7 +25,9 @@ local function bus()
     end
     function b:client(name, settings)
         settings=settings or {}
-        local c={name=name, region=3, guild=101, online=true,legacy=settings.legacy}
+        local c={name=name, region=3, guild=101, online=true,legacy=settings.legacy,
+            character=settings.character or "Current Character", inGuild=settings.inGuild}
+        if settings.guild ~= nil then c.guild=settings.guild end
         local config={region=3,time=100,db=settings.personal}
         local p,s,e=H.fresh(root,settings.prefs,nil,config)
         c.p,c.s,c.e,c.g,c.a=p,s,e,p.GuildBlacklist,p.manual
@@ -33,7 +35,11 @@ local function bus()
         e.GetCurrentRegion=function() return c.region end
         e.GetServerTime=function() return math.floor(self.time)+(settings.clockOffset or 0) end
         e.GetTime=function() return self.time end
-        e.IsInGuild=function() return c.guild ~= false end
+        e.IsInGuild=function()
+            if c.inGuild ~= nil then return c.inGuild end
+            return c.guild ~= false
+        end
+        e.UnitNameUnmodified=function() return c.character:match("^(%S+) (.+)$") end
         e.C_Club={GetGuildClubId=function() return c.guild end}
         e.C_Timer={After=function(elapsed, fn)
             if c.timerThrows then error("virtual timer failure") end
@@ -344,7 +350,7 @@ end
 
 do
     local b=bus()
-    local a=b:client("Scope Tester")
+    local a=b:client("Scope Tester",{shared={version=1,scopes={},members={["3:Current Character"]="3:101"}}})
     local scope=a.g.context()
     local record=add(a,"Delayed Subject","WARLOCK")
     check(share(a,record,scope)=="shared","save initial scoped entry before asynchronous send")
@@ -362,8 +368,9 @@ do
     a.s:event("PLAYER_GUILD_UPDATE","player")
     b:advance(0.8)
     local restored=a.g.context()
-    check(restored~=scope and rows(a)[record.fullName] and share(a,record,scope)=="unavailable",
-        "returning to a guild restores its rows but does not revive previous ownership")
+    check(restored~=scope and not rows(a)[record.fullName] and not a.e.WhowhoGuildBlacklistDB.scopes["3:101"]
+        and share(a,record,scope)=="unavailable",
+        "returning to a left guild finds its saved rows erased and does not revive previous ownership")
     a.region=5
     a.s:event("PLAYER_ENTERING_WORLD",false,false)
     check(#a.g.list()==0 and share(a,record,a.g.context())=="invalid_record","region change cannot expose or share another region's record")
@@ -1785,6 +1792,411 @@ do
     event(a,"X|3:101|12800,1,Seed1 Subject")
     check(not rows(a)["Seed1 Subject"] and removed(a,"Seed1 Subject").gone and held()==512
         and not removed(a,"Record1 Subject") and refreshes==1,"a newer removal at the cap still applies")
+end
+
+-- Leaving a guild erases its saved list; every assertion reads the saved table.
+local ME="3:Current Character"
+local function guildCache(members)
+    return {version=1,scopes={["3:101"]={["Listed Subject"]={rev=0}},["3:303"]={["Other Guild"]={rev=0}}},
+        removed={["3:101"]={["Gone Subject"]={rev=12799,gone=true}}},members=members}
+end
+local function kept(db) return db.scopes["3:101"] ~= nil and db.removed["3:101"] ~= nil end
+local function erased(db)
+    return db.scopes["3:101"]==nil and db.removed["3:101"]==nil and db.scopes["3:303"] ~= nil and db.version==1
+end
+local function member(db, key) return db.members and db.members[key or ME] end
+local function recorded()
+    local b=bus()
+    local db=guildCache()
+    local a=b:client("Guild Member",{shared=db})
+    b:advance(5)
+    assert(member(db)=="3:101","setup: membership recorded")
+    return b,a,db
+end
+local function guildEvent(c, guild)
+    c.guild=guild
+    c.s:event("PLAYER_GUILD_UPDATE","player")
+end
+local function relog(b, old, db, settings)
+    old.online=false
+    settings=settings or {}
+    settings.shared=db
+    return b:client("Guild Member",settings)
+end
+
+do
+    local b=bus()
+    local db=guildCache()
+    local a=b:client("Guild Member",{shared=db})
+    check(db.members==nil,"a single reading records no membership")
+    b:advance(2)
+    a.g.context()
+    check(db.members==nil,"two readings under three seconds apart record nothing")
+    b:advance(3)
+    check(member(db)=="3:101" and db.version==1,"a second reading with no event between records membership")
+
+    local fresh={version=1,scopes={}}
+    local c=b:client("List Later",{shared=fresh,character="Late Lister",guild=404})
+    b:advance(5)
+    check(fresh.members==nil,"a guild without a saved list records nothing")
+    event(c,"E|3:404|,0,Valid Name")
+    check(member(fresh,"3:Late Lister")=="3:404","the first saved list records an already confirmed membership")
+
+    local settled=guildCache()
+    local d=b:client("Event Member",{shared=settled})
+    guildEvent(d,101)
+    b:advance(0.8)
+    check(member(settled)=="3:101","a settled reading after a guild event records at once")
+end
+
+do
+    local b,a,db=recorded()
+    local start=#b.packets
+    guildEvent(a,false)
+    b:advance(59)
+    check(kept(db) and member(db)=="3:101","no guild keeps the list for the first minute")
+    b:advance(2)
+    check(erased(db) and member(db)==nil,"leaving while playing erases rows, removal records and membership")
+    b:advance(120)
+    check(#b.packets==start,"the erase sends nothing")
+    local again=relog(b,a,db,{guild=101})
+    check(again.g.context() and not next(rows(again)) and erased(db),"the erased save loads in a fresh client")
+    check(again.g.add("Listed Subject",{"spam"},nil,(again.g.context()))=="shared","a rejoin starts a new list")
+    b:advance(5)
+    check(db.scopes["3:101"]["Listed Subject"] and member(db)=="3:101","the rejoined guild is recorded again")
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(30)
+    guildEvent(a,101)
+    b:advance(120)
+    check(kept(db) and member(db)=="3:101","a momentary no guild keeps the list")
+
+    local login=relog(b,a,db,{guild=false})
+    b:advance(30)
+    login.guild=101
+    b:advance(120)
+    check(kept(db),"no guild at login keeps the list when the guild reads back, with no event")
+    relog(b,login,db,{inGuild=false})
+    b:advance(120)
+    check(kept(db),"IsInGuild false with a usable club ID is not no guild")
+end
+
+for _, away in ipairs({false,202}) do
+    local b,a,db=recorded()
+    relog(b,a,db,{guild=away})
+    b:advance(59)
+    check(kept(db),"an offline change keeps the list for a minute: "..tostring(away))
+    b:advance(2)
+    check(erased(db) and member(db)==nil,"an offline leave or guild change erases after a minute: "..tostring(away))
+end
+
+do
+    local b,a,db=recorded()
+    relog(b,a,db,{guild=303})
+    b:advance(61)
+    check(erased(db) and member(db)=="3:303",
+        "an offline move to a listed guild erases the old list before recording the new one")
+end
+
+do
+    local b,a,db=recorded()
+    local start=#b.packets
+    guildEvent(a,202)
+    check(kept(db),"an unsettled guild change keeps the list")
+    b:advance(0.8)
+    check(erased(db) and member(db)==nil,"joining another guild while playing erases at once")
+    b:advance(120)
+    check(#b.packets==start+1 and b.packets[#b.packets].message:match("^Q|3:202|"),
+        "the erase sends nothing beyond the new guild's startup query")
+
+    local quiet,silent,quietDB=recorded()
+    silent.guild=202
+    silent.g.context()
+    check(kept(quietDB),"a guild change with no event is not conclusive")
+    quiet:advance(61)
+    check(erased(quietDB),"a guild change with no event erases after a minute")
+
+    local late,stale,staleDB=recorded()
+    stale.inGuild=true
+    guildEvent(stale,nil)
+    late:advance(61)
+    stale.inGuild,stale.guild=nil,202
+    stale.g.context()
+    check(kept(staleDB),"the follow-up reading ends the immediate window")
+
+    local again,home,homeDB=recorded()
+    guildEvent(home,101)
+    again:advance(30)
+    home.guild=202
+    home.g.context()
+    check(kept(homeDB),"a settled reading of the recorded guild ends the immediate window")
+
+    local switch,online,onlineDB=recorded()
+    guildEvent(online,false)
+    switch:advance(5)
+    guildEvent(online,202)
+    switch:advance(0.8)
+    check(erased(onlineDB),"a leave then a join while playing erases the old list at once")
+end
+
+do
+    local b,a,db=recorded()
+    local login=relog(b,a,db,{guild=202})
+    login.s:event("PLAYER_GUILD_UPDATE","player")
+    b:advance(0.8)
+    check(kept(db),"a guild event at login does not trust one other guild reading")
+    b:advance(58)
+    check(kept(db),"the login mismatch keeps the list for a minute")
+    b:advance(2)
+    check(erased(db),"the login mismatch erases after a matching reading")
+
+    local world,c,cache=recorded()
+    c.s:event("PLAYER_LEAVING_WORLD")
+    c.guild=202
+    c.s:event("PLAYER_ENTERING_WORLD",false,false)
+    c.s:event("PLAYER_GUILD_UPDATE","player")
+    world:advance(0.8)
+    check(kept(cache),"a loading screen forgets that the recorded guild was read")
+    world:advance(62)
+    check(erased(cache),"the mismatch after a loading screen erases after a minute")
+
+    local first=bus()
+    local fresh=guildCache()
+    local d=first:client("Event Recorded",{shared=fresh})
+    -- Hold back send timers: their own readings would also close the window.
+    local after=d.e.C_Timer.After
+    d.e.C_Timer.After=function(delay,fn) if delay>=0.75 then after(delay,fn) end end
+    guildEvent(d,101)
+    first:advance(0.8)
+    d.guild=202
+    d.g.context()
+    check(kept(fresh) and member(fresh)=="3:101","the reading that first records a guild ends the window")
+    guildEvent(d,202)
+    first:advance(0.8)
+    check(erased(fresh),"the reading that first records a guild counts as read in it")
+end
+
+do
+    local b,a,db=recorded()
+    local readName=a.e.UnitNameUnmodified
+    a.guild=202
+    a.e.UnitNameUnmodified=function()
+        a.e.UnitNameUnmodified=readName
+        guildEvent(a,202)
+        return readName()
+    end
+    a.g.context()
+    check(kept(db) and member(db)=="3:101","an event during the name read neither erases nor records")
+    b:advance(0.8)
+    check(erased(db),"the interrupted reading leaves the event to its own settlement")
+
+    local fresh=guildCache()
+    local c=b:client("Unrecorded Member",{shared=fresh})
+    local read=c.e.UnitNameUnmodified
+    c.e.UnitNameUnmodified=function()
+        c.e.UnitNameUnmodified=read
+        guildEvent(c,303)
+        return read()
+    end
+    c.g.context()
+    check(fresh.members==nil,"an interrupted name read records nothing")
+    b:advance(0.8)
+    check(member(fresh)=="3:303","the settlement of that event records the new guild")
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(20)
+    guildEvent(a,101)
+    b:advance(20)
+    guildEvent(a,false)
+    b:advance(30)
+    check(kept(db),"a rejoin drops the first leave timer")
+    b:advance(32)
+    check(erased(db),"the second leave has its own minute")
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(30)
+    a.s:event("PLAYER_LEAVING_WORLD")
+    b:advance(60)
+    check(kept(db),"nothing is erased during a loading screen")
+    a.s:event("PLAYER_ENTERING_WORLD",false,false)
+    b:advance(59)
+    check(kept(db),"a loading screen restarts the minute")
+    b:advance(2)
+    check(erased(db),"the leave is still found after the loading screen")
+end
+
+for _, away in ipairs({false,202}) do
+    local b,a,db=recorded()
+    guildEvent(a,101)
+    b:advance(10)
+    a.guild=away
+    b:advance(49)
+    check(kept(db),"the old guild still read after the event keeps the list: "..tostring(away))
+    b:advance(62)
+    check(erased(db),"the follow-up reading finds a lagging leave: "..tostring(away))
+end
+
+local function longTimers(c)
+    local found={}
+    local after=c.e.C_Timer.After
+    c.e.C_Timer.After=function(delay,fn)
+        if delay>=30 then found[#found+1]=delay end
+        return after(delay,fn)
+    end
+    return found
+end
+
+do
+    local b,a=recorded()
+    local timers=longTimers(a)
+    guildEvent(a,101)
+    b:advance(1)
+    check(#timers==1 and timers[1]==59.25,"a recorded guild gets one follow-up reading a minute after the event")
+
+    local db=guildCache()
+    local c=b:client("Unlisted Member",{shared=db,character="Unlisted Member",guild=404})
+    b:advance(5)
+    local none=longTimers(c)
+    guildEvent(c,404)
+    b:advance(1)
+    check(#none==0 and member(db,"3:Unlisted Member")==nil,"without a recorded guild no follow-up is scheduled")
+    c.guild=303
+    c.g.context()
+    check(member(db,"3:Unlisted Member")==nil,"with no follow-up one later reading records nothing")
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(30)
+    a.s:event("PLAYER_LEAVING_WORLD")
+    b:advance(10)
+    a.s:event("PLAYER_ENTERING_WORLD",false,false)
+    b:advance(21)
+    check(kept(db),"a loading screen drops the pending leave timer")
+
+    local late,c,cache=recorded()
+    guildEvent(c,101)
+    late:advance(1)
+    c.s:event("PLAYER_LEAVING_WORLD")
+    c.s:event("PLAYER_ENTERING_WORLD",false,false)
+    c.guild=202
+    c.g.context()
+    check(kept(cache),"one other guild reading after a loading screen keeps the list")
+
+    local relogged,d,saved=recorded()
+    local login=relog(relogged,d,saved,{guild=false})
+    relogged:advance(59)
+    login.guild=202
+    relogged:advance(2)
+    check(kept(saved),"a timer reading that differs from the first mismatch erases nothing")
+end
+
+do
+    local b=bus()
+    local db=guildCache()
+    local first=b:client("First Alt",{shared=db,character="First Alt"})
+    b:advance(5)
+    first.online=false
+    local second=b:client("Second Alt",{shared=db,character="Second Alt"})
+    b:advance(5)
+    check(member(db,"3:First Alt")=="3:101" and member(db,"3:Second Alt")=="3:101","both alts are recorded")
+    guildEvent(second,202)
+    b:advance(120)
+    check(kept(db) and member(db,"3:Second Alt")==nil and member(db,"3:First Alt")=="3:101",
+        "an alt still recorded in the guild keeps its list")
+    second.online=false
+    b:client("First Alt",{shared=db,character="First Alt",guild=false})
+    b:advance(61)
+    check(erased(db) and member(db,"3:First Alt")==nil,"the last recorded character erases the list")
+end
+
+do
+    local b=bus()
+    local db=guildCache()
+    b:client("Never Recorded",{shared=db,guild=false})
+    b:advance(120)
+    check(kept(db) and db.members==nil,"an rc.2 save loses nothing for a guild never seen")
+
+    for _, bad in ipairs({5,"text",{[ME]="4:101"},{[ME]="3:101x"},{[ME]=true},{["4:Current Character"]="4:101"},
+        {["3:Onlyone"]="3:101",[7]="3:101"}}) do
+        local cache=guildCache(bad)
+        local c=b:client("Bad Members",{shared=cache,guild=false})
+        b:advance(120)
+        check(kept(cache) and cache.members==bad,"bad membership entries erase nothing")
+        c.online=false
+    end
+    local replaced=guildCache(5)
+    local c=b:client("Replaced Members",{shared=replaced})
+    check(c.g.context() and replaced.members==5,"a non-table membership value does not reject the store")
+    b:advance(5)
+    check(member(replaced)=="3:101","the next write replaces a non-table membership value")
+    c.online=false
+    local junk=guildCache({[ME]="junk",["3:Bad Alt"]="4:101"})
+    local d=b:client("Junk Members",{shared=junk})
+    b:advance(5)
+    guildEvent(d,202)
+    b:advance(0.8)
+    check(erased(junk),"bad entries neither block recording nor protect a list")
+end
+
+for _, failure in ipairs({"throw","missing"}) do
+    for _, away in ipairs({false,202}) do
+        local b,a,db=recorded()
+        if failure=="throw" then a.timerThrows=true else a.e.C_Timer.After=nil end
+        guildEvent(a,away)
+        a.s:event("INITIAL_CLUBS_LOADED")
+        a.g.context()
+        b:advance(120)
+        a.g.context()
+        check(kept(db),"a "..failure.." timer never erases: "..tostring(away))
+    end
+end
+
+for _, unknown in ipairs({"name","guild","region","secret club","failing club","no club"}) do
+    local b,a,db=recorded()
+    a.guild=false
+    if unknown=="name" then a.e.UnitNameUnmodified=function() error("unreadable") end
+    elseif unknown=="guild" then a.e.IsInGuild=function() return a.s.secret end
+    elseif unknown=="region" then a.e.GetCurrentRegion=function() return a.s.secret end
+    elseif unknown=="secret club" then a.e.C_Club.GetGuildClubId=function() return a.s.secret end
+    elseif unknown=="failing club" then a.e.C_Club.GetGuildClubId=function() error("unreadable") end
+    else a.inGuild,a.guild=true,nil end
+    a.s:event("PLAYER_GUILD_UPDATE","player")
+    b:advance(70)
+    a.g.context()
+    b:advance(70)
+    check(kept(db) and member(db)=="3:101","unknown membership keeps the list: "..unknown)
+end
+
+do
+    local b,a,db=recorded()
+    guildEvent(a,false)
+    b:advance(30)
+    a.character="Other Person"
+    b:advance(40)
+    check(kept(db),"a leave timer cannot erase for another character name")
+end
+
+do
+    local b=bus()
+    local db={version=1,scopes={},members={[ME]="3:101"}}
+    for club=101,132 do db.scopes["3:"..club]={} end
+    local a=b:client("Scope Slot",{shared=db})
+    b:advance(2)
+    guildEvent(a,202)
+    b:advance(0.8)
+    check(db.scopes["3:101"]==nil and a.g.add("New Subject",{"spam"},nil,(a.g.context()))=="shared"
+        and db.scopes["3:202"],"the erased list frees its scope slot")
 end
 
 check(H.forbiddenCalls==0,"the fake bus never invokes real native actions")
