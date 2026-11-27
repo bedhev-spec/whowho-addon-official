@@ -38,6 +38,28 @@ local unused = assert(store.activeRecords("unused"))
 check(unused[draft.id] and next(unused, draft.id) == nil and next(unused) == draft.id, "unused region has only global drafts")
 reject(function() return store.activeRecords(nil) end, "invalid_region")
 reject(function() return store.activeRecords(0/0) end, "invalid_region")
+local function ids(source, scope)
+    local seen = {}
+    check(source.eachActive(scope, function(record) seen[#seen + 1] = record.id end) == true, "iteration completes")
+    table.sort(seen)
+    return table.concat(seen, ",")
+end
+local expected = {}
+for id in pairs(assert(store.activeRecords(3))) do expected[#expected + 1] = id end
+table.sort(expected)
+check(ids(store, 3) == table.concat(expected, ","), "eachActive visits the selected region and global drafts")
+check(ids(store, "unused") == tostring(draft.id), "eachActive on an unused region visits only drafts")
+reject(function() return store.eachActive(nil, error) end, "invalid_region")
+reject(function() return store.eachActive(0/0, error) end, "invalid_region")
+local visits = 0
+check(store.eachActive(3, function() visits = visits + 1; return false end) == false and visits == 1, "eachActive stops on false")
+local copied = assert(book.open(store.export()))
+visits = 0
+copied.eachActive(3, function()
+    visits = visits + 1
+    for i = 1, 20 do copied.add({fullName="Late N" .. visits .. "x" .. i, region=3, identityState="resolved", membership="friend"}, 100) end
+end)
+check(visits == #expected, "records added while iterating are not visited")
 reject(function() return store.find(3, "Élan") end, "not_found")
 reject(function() return store.resolve(draft.id, 3, "Élan Amber", "guid-new", 110) end, "conflict")
 check(assert(store.get(draft.id)).identityState == "unresolved", "failed resolution atomic")

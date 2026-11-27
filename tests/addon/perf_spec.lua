@@ -230,7 +230,16 @@ do
     check(calls.open>0 and calls.export>0,"the save is counted")
     bound("1000 records, store opens",calls.open,1)
     bound("1000 records, store exports",calls.export,2)
-    bound("1000 records, activeRecords copies",calls.activeRecords,1)
+    bound("1000 records, activeRecords copies",calls.activeRecords,0)
+end
+
+-- View items never alias saved records.
+do
+    local _,s,_,A=fresh()
+    s:add("Ari North",nil,"blacklist")
+    A.records[1].reasonIds[1],A.records[1].note="spam","changed"
+    local saved=A.store.get(1)
+    check(saved.reasonIds[1]=="other" and saved.note==nil,"items cannot mutate saved records")
 end
 
 print("RESULT perf "..count.." passed 0 failed")
