@@ -84,18 +84,30 @@ assert(w.guildCalls==1 and w.recentCalls==1 and v.WhowhoAddressBookDB==before an
 local z,zs,ze,zt=setup(prefs); zt.guildReady=true; zt.recentReady=true
 zs:event("PLAYER_ENTERING_WORLD",false,false); zs:event("INITIAL_CLUBS_LOADED"); zs:event("RECENT_ALLIES_DATA_READY"); assertNoRead(zt)
 -- No guild once clubs have loaded ends the Guild wait; earlier or unreadable answers do not.
-for _,case in ipairs({{inGuild=false,calls=0},{inGuild=true,calls=1},{secret=true,calls=1}}) do
+local function listening(s,event)
+    for _,frame in ipairs(s.nodes) do if frame.events[event] then return true end end
+    return false
+end
+for _,case in ipairs({{inGuild=false,calls=0},{inGuild=true,calls=1},{secret=true,calls=1},{inGuild=false,secretClub=true,calls=1}}) do
     local g,gs,ge,gt=setup(prefs); local club
-    ge.C_Club.GetGuildClubId=function() return club end
+    ge.C_Club.GetGuildClubId=function() if case.secretClub and not club then return gs.secret end return club end
     ge.IsInGuild=function() if case.secret then return gs.secret end return case.inGuild end
     gs:event("PLAYER_ENTERING_WORLD",true,false); gs:event("CLUB_MEMBERS_UPDATED",5); gs:event("PLAYER_REGEN_ENABLED")
     gs:event("INITIAL_CLUBS_LOADED")
+    -- GuildBlacklist keeps its own INITIAL_CLUBS_LOADED listener, so probe the relog-only event.
+    assert(listening(gs,"CLUB_MEMBERS_UPDATED")==(case.calls==1))
     club=5; gt.guildReady=true; gt.rows={guildRow("Guild North","g",1)}
     gs:event("CLUB_MEMBERS_UPDATED",5)
     assert(gt.guildCalls==case.calls)
     gt.recentReady=true; gt.allies={ally("Recent North","r",true)}; gs:event("RECENT_ALLIES_DATA_READY")
     assert(gt.recentCalls==1 and row(g,recent).presenceReport.online==true)
+    assert(not listening(gs,"CLUB_MEMBERS_UPDATED") and not listening(gs,"RECENT_ALLIES_CACHE_UPDATE"))
 end
+-- A usable club wins over a lagging IsInGuild.
+local l,ls_,le,lt=setup(prefs); le.IsInGuild=function() return false end
+lt.rows={guildRow("Guild North","g",1)}
+ls_:event("PLAYER_ENTERING_WORLD",true,false); lt.guildReady=true; ls_:event("INITIAL_CLUBS_LOADED")
+assert(lt.guildCalls==1 and row(l,guild).presenceReport.online==true)
 -- IsInGuild false before clubs load is not trusted.
 local o,os_,oe,ot=setup(prefs); local oclub
 oe.C_Club.GetGuildClubId=function() return oclub end

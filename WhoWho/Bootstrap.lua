@@ -247,10 +247,12 @@ local function onRelogEvent(event,initialLogin,reloadingUI)
         if relogCycle~=run then return end
         run.started=true
     elseif run.started then
-        -- A guildless character never becomes ready. IsInGuild is trusted only once clubs have loaded.
-        if event=="INITIAL_CLUBS_LOADED" and P.manual.nativeRead.read(IsInGuild)==false then
+        -- A guildless character never becomes ready. Trust that only after clubs load, with no club ID.
+        local native=P.manual.nativeRead
+        if event=="INITIAL_CLUBS_LOADED" and native.read(IsInGuild)==false then
+            local ok,club=pcall(native.member(C_Club,"GetGuildClubId"))
             if relogCycle~=run then return end
-            finishRelog(run,"Guild")
+            if ok and native.readable(club) and club==nil then finishRelog(run,"Guild") end
         end
         local source=relogEvents[event]
         for _,provider in ipairs(relogSources) do
