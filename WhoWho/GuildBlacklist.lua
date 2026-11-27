@@ -12,7 +12,7 @@ local REVISION_TICKS, MAX_SERVER_TIME, CLOCK_SKEW = 128.0, 4294967295, 5
 local MAX_REVISION = (MAX_SERVER_TIME+1)*REVISION_TICKS-1
 local SEND_INTERVAL, SYNC_INTERVAL, REPLY_INTERVAL, MEMBERSHIP_SETTLE = 1.25, 30, 90, 0.75
 local SCOPE_WAITS = {3, 6, 12, 24, 48, 84}
-local MAX_MEMBERS, CONFIRM_DELAY, LEAVE_DELAY = 256, 3, 60
+local MAX_MEMBERS, CONFIRM_DELAY, EVENT_WINDOW, LEAVE_DELAY = 256, 3, 60, 300
 local SAMPLE_WINDOW, SAMPLE_LIFETIME, MAX_ACKS, MAX_RESPONDERS = 12, 60, 8, 1024
 -- ChatConstantsDocumentation.lua for the pinned Forever build.
 local SUCCESS, DUPLICATE_PREFIX, ADDON_THROTTLE, CHANNEL_THROTTLE, LOCKDOWN = 0, 1, 3, 8, 11
@@ -1215,7 +1215,7 @@ local function confirmMembership(ticket, requireNewScope)
     end
     local _, _, changed=currentState()
     -- The settled reading can still show the old guild with no later event. The follow-up also ends the window.
-    if not (lastCharacter and recordedGuild(lastCharacter) and later(LEAVE_DELAY-MEMBERSHIP_SETTLE,function()
+    if not (lastCharacter and recordedGuild(lastCharacter) and later(EVENT_WINDOW-MEMBERSHIP_SETTLE,function()
         reread()
         if guildEvent == ticket then guildEvent=nil end
     end)) and guildEvent == ticket then guildEvent=nil end

@@ -1853,8 +1853,8 @@ do
     local b,a,db=recorded()
     local start=#b.packets
     guildEvent(a,false)
-    b:advance(59)
-    check(kept(db) and member(db)=="3:101","no guild keeps the list for the first minute")
+    b:advance(299)
+    check(kept(db) and member(db)=="3:101","no guild keeps the list for the first five minutes")
     b:advance(2)
     check(erased(db) and member(db)==nil,"leaving while playing erases rows, removal records and membership")
     b:advance(120)
@@ -1871,32 +1871,32 @@ do
     guildEvent(a,false)
     b:advance(30)
     guildEvent(a,101)
-    b:advance(120)
+    b:advance(600)
     check(kept(db) and member(db)=="3:101","a momentary no guild keeps the list")
 
     local login=relog(b,a,db,{guild=false})
     b:advance(30)
     login.guild=101
-    b:advance(120)
+    b:advance(600)
     check(kept(db),"no guild at login keeps the list when the guild reads back, with no event")
     relog(b,login,db,{inGuild=false})
-    b:advance(120)
+    b:advance(600)
     check(kept(db),"IsInGuild false with a usable club ID is not no guild")
 end
 
 for _, away in ipairs({false,202}) do
     local b,a,db=recorded()
     relog(b,a,db,{guild=away})
-    b:advance(59)
-    check(kept(db),"an offline change keeps the list for a minute: "..tostring(away))
+    b:advance(299)
+    check(kept(db),"an offline change keeps the list for five minutes: "..tostring(away))
     b:advance(2)
-    check(erased(db) and member(db)==nil,"an offline leave or guild change erases after a minute: "..tostring(away))
+    check(erased(db) and member(db)==nil,"an offline leave or guild change erases after five minutes: "..tostring(away))
 end
 
 do
     local b,a,db=recorded()
     relog(b,a,db,{guild=303})
-    b:advance(61)
+    b:advance(301)
     check(erased(db) and member(db)=="3:303",
         "an offline move to a listed guild erases the old list before recording the new one")
 end
@@ -1916,8 +1916,8 @@ do
     silent.guild=202
     silent.g.context()
     check(kept(quietDB),"a guild change with no event is not conclusive")
-    quiet:advance(61)
-    check(erased(quietDB),"a guild change with no event erases after a minute")
+    quiet:advance(301)
+    check(erased(quietDB),"a guild change with no event erases after five minutes")
 
     local late,stale,staleDB=recorded()
     stale.inGuild=true
@@ -1948,8 +1948,8 @@ do
     login.s:event("PLAYER_GUILD_UPDATE","player")
     b:advance(0.8)
     check(kept(db),"a guild event at login does not trust one other guild reading")
-    b:advance(58)
-    check(kept(db),"the login mismatch keeps the list for a minute")
+    b:advance(298)
+    check(kept(db),"the login mismatch keeps the list for five minutes")
     b:advance(2)
     check(erased(db),"the login mismatch erases after a matching reading")
 
@@ -1960,8 +1960,8 @@ do
     c.s:event("PLAYER_GUILD_UPDATE","player")
     world:advance(0.8)
     check(kept(cache),"a loading screen forgets that the recorded guild was read")
-    world:advance(62)
-    check(erased(cache),"the mismatch after a loading screen erases after a minute")
+    world:advance(302)
+    check(erased(cache),"the mismatch after a loading screen erases after five minutes")
 
     local first=bus()
     local fresh=guildCache()
@@ -2014,10 +2014,10 @@ do
     guildEvent(a,101)
     b:advance(20)
     guildEvent(a,false)
-    b:advance(30)
+    b:advance(270)
     check(kept(db),"a rejoin drops the first leave timer")
     b:advance(32)
-    check(erased(db),"the second leave has its own minute")
+    check(erased(db),"the second leave has its own five minutes")
 end
 
 do
@@ -2025,11 +2025,11 @@ do
     guildEvent(a,false)
     b:advance(30)
     a.s:event("PLAYER_LEAVING_WORLD")
-    b:advance(60)
+    b:advance(600)
     check(kept(db),"nothing is erased during a loading screen")
     a.s:event("PLAYER_ENTERING_WORLD",false,false)
-    b:advance(59)
-    check(kept(db),"a loading screen restarts the minute")
+    b:advance(299)
+    check(kept(db),"a loading screen restarts the five minutes")
     b:advance(2)
     check(erased(db),"the leave is still found after the loading screen")
 end
@@ -2041,7 +2041,7 @@ for _, away in ipairs({false,202}) do
     a.guild=away
     b:advance(49)
     check(kept(db),"the old guild still read after the event keeps the list: "..tostring(away))
-    b:advance(62)
+    b:advance(302)
     check(erased(db),"the follow-up reading finds a lagging leave: "..tostring(away))
 end
 
@@ -2081,7 +2081,7 @@ do
     a.s:event("PLAYER_LEAVING_WORLD")
     b:advance(10)
     a.s:event("PLAYER_ENTERING_WORLD",false,false)
-    b:advance(21)
+    b:advance(261)
     check(kept(db),"a loading screen drops the pending leave timer")
 
     local late,c,cache=recorded()
@@ -2095,7 +2095,7 @@ do
 
     local relogged,d,saved=recorded()
     local login=relog(relogged,d,saved,{guild=false})
-    relogged:advance(59)
+    relogged:advance(299)
     login.guild=202
     relogged:advance(2)
     check(kept(saved),"a timer reading that differs from the first mismatch erases nothing")
@@ -2116,7 +2116,7 @@ do
         "an alt still recorded in the guild keeps its list")
     second.online=false
     b:client("First Alt",{shared=db,character="First Alt",guild=false})
-    b:advance(61)
+    b:advance(301)
     check(erased(db) and member(db,"3:First Alt")==nil,"the last recorded character erases the list")
 end
 
@@ -2124,14 +2124,14 @@ do
     local b=bus()
     local db=guildCache()
     b:client("Never Recorded",{shared=db,guild=false})
-    b:advance(120)
+    b:advance(600)
     check(kept(db) and db.members==nil,"an rc.2 save loses nothing for a guild never seen")
 
     for _, bad in ipairs({5,"text",{[ME]="4:101"},{[ME]="3:101x"},{[ME]=true},{["4:Current Character"]="4:101"},
         {["3:Onlyone"]="3:101",[7]="3:101"}}) do
         local cache=guildCache(bad)
         local c=b:client("Bad Members",{shared=cache,guild=false})
-        b:advance(120)
+        b:advance(600)
         check(kept(cache) and cache.members==bad,"bad membership entries erase nothing")
         c.online=false
     end
@@ -2156,7 +2156,7 @@ for _, failure in ipairs({"throw","missing"}) do
         guildEvent(a,away)
         a.s:event("INITIAL_CLUBS_LOADED")
         a.g.context()
-        b:advance(120)
+        b:advance(600)
         a.g.context()
         check(kept(db),"a "..failure.." timer never erases: "..tostring(away))
     end
@@ -2172,9 +2172,9 @@ for _, unknown in ipairs({"name","guild","region","secret club","failing club","
     elseif unknown=="failing club" then a.e.C_Club.GetGuildClubId=function() error("unreadable") end
     else a.inGuild,a.guild=true,nil end
     a.s:event("PLAYER_GUILD_UPDATE","player")
-    b:advance(70)
+    b:advance(350)
     a.g.context()
-    b:advance(70)
+    b:advance(350)
     check(kept(db) and member(db)=="3:101","unknown membership keeps the list: "..unknown)
 end
 
@@ -2183,7 +2183,7 @@ do
     guildEvent(a,false)
     b:advance(30)
     a.character="Other Person"
-    b:advance(40)
+    b:advance(280)
     check(kept(db),"a leave timer cannot erase for another character name")
 end
 
