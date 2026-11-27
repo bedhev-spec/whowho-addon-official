@@ -199,12 +199,23 @@ function P.TintMaterial(texture,alternateTint)
 end
 -- Match a reference pixel by channel while retaining the material's texture and alpha.
 local function tintToReference(texture,color,reference)
+    -- A tint cannot add red to the cool art, so warmer colors start from its gray.
+    local warmer=color[1]>reference[1]
+    texture:SetDesaturated(warmer)
+    if warmer then
+        local gray=.3*reference[1]+.59*reference[2]+.11*reference[3]
+        reference={gray,gray,gray}
+    end
     texture:SetVertexColor(math.min(1,color[1]/reference[1]),math.min(1,color[2]/reference[2]),math.min(1,color[3]/reference[3]),1)
+end
+local function clearTint(texture)
+    texture:SetDesaturated(false)
+    texture:SetVertexColor(unpack(white))
 end
 local caseReference=rgb("1C2225")
 function P.TintCaseMaterial(texture)
     P.BindPalette(texture,function(self,id)
-        if id==defaultPalette then self:SetVertexColor(unpack(white))
+        if id==defaultPalette then clearTint(self)
         else tintToReference(self,C.background,caseReference) end
     end)
 end
@@ -479,12 +490,12 @@ local function setFieldSkin(box,focused)
         local color,reference=C.controlBorder,fieldReference
         if focused then color,reference=C.teal,focusReference end
         P.BindPalette(skin,function(self,id)
-            if id==defaultPalette then self:SetVertexColor(unpack(white))
+            if id==defaultPalette then clearTint(self)
             else tintToReference(self,color,reference) end
         end)
     else
         repaint[skin]=nil
-        skin:SetVertexColor(unpack(white))
+        clearTint(skin)
     end
 end
 function P.SetFieldEnabled(box,enabled)

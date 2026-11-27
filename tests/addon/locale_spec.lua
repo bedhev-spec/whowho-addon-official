@@ -306,8 +306,15 @@ local function rgb(hex)
     return {tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255,1}
 end
 local function checkMaterialTint(material,reference,desired)
-    for index,value in ipairs(rgb(reference)) do
-        assert(math.abs(material.vertexColor[index]*value-math.min(value,desired[index]))<1e-9)
+    local base=rgb(reference)
+    local warmer=desired[1]>base[1]
+    assert(not not material.desaturated==warmer)
+    if warmer then
+        local gray=.3*base[1]+.59*base[2]+.11*base[3]
+        base={gray,gray,gray}
+    end
+    for index=1,3 do
+        assert(math.abs(material.vertexColor[index]*base[index]-math.min(base[index],desired[index]))<1e-9)
     end
 end
 local function checkSwatches(shell)
@@ -479,6 +486,17 @@ checkMaterialTint(formName.fieldSkin,"9CDCE0",colors.teal)
 formName:ClearFocus()
 assert(formName.fieldSkin.texture==p.media.."LedgerField.tga")
 checkMaterialTint(formName.fieldSkin,"718086",colors.controlBorder)
+formName:SetFocus()
+p.SetInterfaceColor("umber")
+assert(formName.fieldSkin.desaturated)
+checkMaterialTint(formName.fieldSkin,"9CDCE0",colors.teal)
+p.SetInterfaceColor("default")
+assert(not formName.fieldSkin.desaturated)
+sameColor(formName.fieldSkin.vertexColor,{1,1,1,1})
+p.SetInterfaceColor("umber")
+p.SetFieldEnabled(formName,false)
+assert(not formName.fieldSkin.desaturated)
+sameColor(formName.fieldSkin.vertexColor,{1,1,1,1})
 S.editor.controls.formCancel:Click()
 assert(s.forbiddenCalls==0)
 print("RESULT manual locale and interface color localization, live rendering and preference restore passed")
