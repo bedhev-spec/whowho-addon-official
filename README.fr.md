@@ -64,7 +64,7 @@ Vous pouvez ajouter des joueurs des deux factions. WhoWho peut repérer un joueu
 
 ### Combien de temps durent les alertes et quand peuvent-elles se répéter ?
 
-La bannière reste visible pendant 8 secondes avant de s’estomper. Après une alerte, WhoWho attend au moins 30 secondes avant de vous alerter à nouveau pour le même joueur. Quand vous ajoutez un joueur à votre liste noire personnelle, le délai est de 5 minutes pour ce joueur. Une fois le délai écoulé, WhoWho peut vous alerter s’il repère à nouveau ce joueur lors d’une nouvelle rencontre.
+La bannière reste visible pendant 8 secondes avant de s’estomper. Après une alerte, WhoWho attend au moins 30 secondes avant de vous alerter à nouveau pour le même joueur. Quand vous ajoutez un joueur à votre liste noire personnelle, le délai est de 5 minutes pour ce joueur. Une fois le délai écoulé, WhoWho peut vous alerter s’il repère à nouveau ce joueur lors d’une nouvelle rencontre. Une exception : si un joueur de votre liste noire rejoint votre groupe ou votre raid pendant un délai, WhoWho vous alerte quand même, au maximum une fois toutes les 30 secondes par joueur.
 
 ### Les alertes fonctionnent-elles en donjon ou en raid ?
 
