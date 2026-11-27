@@ -49,6 +49,8 @@ local function interfaceSwatch(parent,preset)
     local fill=P.Material(circle,"RoundFill")
     fill:SetVertexColor(unpack(preset.swatch))
     button.ring=P.Material(circle,"RoundEdge",nil,"ARTWORK")
+    -- Outside the circle, so a pale swatch cannot swallow the ring.
+    button.ring:ClearAllPoints(); button.ring:SetSize(26,26); button.ring:SetPoint("CENTER")
     button.mark=P.Glyph(circle,"online",12,preset.swatchInk)
     button.mark:SetPoint("CENTER")
     button:SetScript("OnClick",function(self)
