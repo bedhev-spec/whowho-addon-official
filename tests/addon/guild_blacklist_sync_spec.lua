@@ -1721,5 +1721,71 @@ do
         "confirm gives its result at once, with no reply and a failing send")
 end
 
+-- The open dialog survives a transport pause, but not new or unsettled membership.
+for _, change in ipairs({"restriction toggled","still paused","membership resettled","membership settling","guild change"}) do
+    local b=bus()
+    local a=b:client("Dialog Deleter")
+    local peer=b:client("Dialog Watcher")
+    b:advance(5)
+    local name="Dialog Subject"
+    check(a.g.add(name,{"spam"},nil,(a.g.context()))=="shared","a row exists for the dialog")
+    b:advance(10)
+    a.p.Toggle()
+    local S=a.p.Shell
+    S.nav.guildBlacklist:Click()
+    S.rows[1].deleteButton:Click()
+    check(S.deleteDialog:IsShown(),"the dialog opens: "..change)
+    local token=a.g.context()
+    if change=="restriction toggled" then
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,2)
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,0)
+        check(a.g.context() and a.g.context()~=token,"the toggle issues a new write token")
+    elseif change=="still paused" then
+        a.s:event("ADDON_RESTRICTION_STATE_CHANGED",5,2)
+    else
+        if change=="guild change" then a.guild=202 end
+        a.s:event("PLAYER_GUILD_UPDATE","player")
+        if change=="membership resettled" then b:advance(5) end
+        if change=="guild change" then b:advance(5) end
+    end
+    -- A guild change closes the dialog itself; a click on its hidden button must still delete nothing.
+    S.deleteConfirm:Click()
+    b:advance(10)
+    if change=="restriction toggled" then
+        check(not S.deleteDialog:IsShown() and not rows(a)[name] and not rows(peer)[name],
+            "confirm after a toggle deletes for the guild")
+    else
+        check(not a.e.WhowhoGuildBlacklistDB.removed and rows(peer)[name],"nothing is deleted: "..change)
+        check(change=="guild change" and not S.deleteDialog:IsShown()
+            or S.deleteError:GetText()=="Deleting is unavailable.","the dialog reports or has closed: "..change)
+    end
+end
+
+-- At the record cap, a removal older than every held record is ignored whole.
+do
+    local b=bus()
+    local seeded=seededCache(2)
+    local records={}
+    for index=1,512 do records["Record"..index.." Subject"]={rev=1000+index,gone=true} end
+    seeded.removed={["3:101"]=records}
+    local a=b:client("Capped Receiver",{shared=seeded})
+    b:advance(2)
+    local function held()
+        local total=0
+        for _ in pairs(a.e.WhowhoGuildBlacklistDB.removed["3:101"]) do total=total+1 end
+        return total
+    end
+    local refreshes=0
+    a.p.Shell.RefreshGuildBlacklist=function() refreshes=refreshes+1 end
+    event(a,"X|3:101|1000,1,Seed1 Subject")
+    check(rows(a)["Seed1 Subject"] and refreshes==0 and held()==512 and not removed(a,"Seed1 Subject")
+        and removed(a,"Record1 Subject"),"an older removal at the cap changes nothing")
+    event(a,"E|3:101|,0,Seed1 Subject")
+    check(rows(a)["Seed1 Subject"] and refreshes==0,"a stale row packet has nothing to bring back")
+    event(a,"X|3:101|12800,1,Seed1 Subject")
+    check(not rows(a)["Seed1 Subject"] and removed(a,"Seed1 Subject").gone and held()==512
+        and not removed(a,"Record1 Subject") and refreshes==1,"a newer removal at the cap still applies")
+end
+
 check(H.forbiddenCalls==0,"the fake bus never invokes real native actions")
 print(string.format("RESULT guild-blacklist-sync %d passed",count))
