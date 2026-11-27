@@ -48,6 +48,18 @@ P.interfaceColors = {
         selected="27231D",friendSelected="27231D",hover="29261F",pressed="151410",selectedHover="312B22",selectedPressed="211E17",
         selectedRule="D8C198",selection="554934",teal="D8C198",controlBorder="8F816A",controlTrack="8F816A",
         copper="DCC7A4",copperHover="E8D4B3",copperPressed="C7B08A",ink="241D14"
+    }},
+    {id="graphite",label="Graphite",colors={
+        background="18191A",panel="18191A",header="26282A",raised="26282A",noteInset="202223",railTint="26282A",
+        selected="2F3235",friendSelected="2F3235",hover="2D2F32",pressed="151617",selectedHover="373B3F",selectedPressed="222426",
+        selectedRule="C5CCD3",selection="4A5057",teal="C5CCD3",controlBorder="777D83",controlTrack="777D83",
+        copper="D5D9DD",copperHover="E3E6E9",copperPressed="BCC1C6",ink="1B1D1F"
+    }},
+    {id="umber",label="Umber",colors={
+        background="1A1714",panel="1A1714",header="2A241F",raised="2A241F",noteInset="221D19",railTint="2A241F",
+        selected="352A22",friendSelected="352A22",hover="312923",pressed="151210",selectedHover="3E3128",selectedPressed="271F19",
+        selectedRule="C29A7C",selection="5A4334",teal="C29A7C",controlBorder="857264",controlTrack="857264",
+        copper="C9A183",copperHover="D7B398",copperPressed="AF8A6F",ink="221810"
     }}
 }
 local retiredPresets={copper=cyanSlate,copperTheme=cyanSlate}

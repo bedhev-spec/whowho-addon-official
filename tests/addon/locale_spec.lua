@@ -298,6 +298,8 @@ local choices={
     {"slateBlue","Bleu portuaire","Harbor Blue",{"131B25","131B25","1D2938","1D2938","233349","233349","91C2E8","B0CEF0","141E2C","687D97","687D97"},"1D2938"},
     {"forestGreen","Vert mousse","Moss Green",{"171D18","171D18","242D25","242D25","27362C","27362C","ABD2B1","C0D8AE","182218","718275","718275"},"242D25"},
     {"beige","Beige","Beige",{"171613","201E1A","28241F","28241F","27231D","27231D","D8C198","DCC7A4","241D14","8F816A","8F816A"},"28241F"},
+    {"graphite","Graphite","Graphite",{"18191A","18191A","26282A","26282A","2F3235","2F3235","C5CCD3","D5D9DD","1B1D1F","777D83","777D83"},"26282A"},
+    {"umber","Terre d’ombre","Umber",{"1A1714","1A1714","2A241F","2A241F","352A22","352A22","C29A7C","C9A183","221810","857264","857264"},"2A241F"},
 }
 local roles={"background","panel","header","raised","selected","friendSelected","selectedRule","copper","ink","controlBorder","controlTrack"}
 local function rgb(hex)
