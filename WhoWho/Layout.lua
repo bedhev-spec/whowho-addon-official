@@ -130,7 +130,7 @@ function S.ArrangeRoster()
         if not P.manual then at(row,18,rowTop+(i-1)*rowPitch) end
         row:SetSize(width-36,rowPitch)
         local nameWidth=(cramped and width-(P.manual and 172 or 144) or presenceX-54)-favoriteInset
-        if blacklist then nameWidth=width-(guild and 72 or 180) end
+        if blacklist then nameWidth=width-(guild and 108 or 180) end
         row.name:SetWidth(nameWidth); row.note:SetWidth(nameWidth)
         if P.manual then
             at(row.name,22+favoriteInset,blacklist and 15 or 9)
