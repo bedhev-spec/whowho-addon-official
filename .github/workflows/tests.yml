@@ -30,7 +30,7 @@ jobs:
           if [[ -z "$changed" ]]; then
             echo 'readme_only=true' >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.changes.outputs.readme_only != 'true'
         with:
           node-version: '24'
