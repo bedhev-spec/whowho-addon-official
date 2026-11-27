@@ -266,8 +266,41 @@ local function recordMember(seen)
     end
 end
 
+local function dropScope(key)
+    if db[key] then
+        db[key]=nil
+        scopeCount=scopeCount-1
+    end
+    -- The loader rejects removal records without their scope.
+    WhowhoGuildBlacklistDB.scopes[key]=nil
+    if WhowhoGuildBlacklistDB.removed then WhowhoGuildBlacklistDB.removed[key]=nil end
+end
+
+-- A saved list no recorded character points to, fewest entries first.
+-- shortcut: a list waiting for the leave erase still counts as claimed, so a second list can go; erasing it sooner would trust one guild reading.
+local function spareScope()
+    local members=WhowhoGuildBlacklistDB and WhowhoGuildBlacklistDB.members
+    local claimed={}
+    if plain(members) then
+        for character, key in pairs(members) do
+            if validMember(character,key) then claimed[key]=true end
+        end
+    end
+    local spare
+    for key, data in pairs(db) do
+        if not claimed[key] and (not spare or data.count < db[spare].count
+            or data.count == db[spare].count and key < spare) then spare=key end
+    end
+    return spare
+end
+
 local function publish(current)
     if not db[current.key] then
+        -- Only a new guild's list gets here unsaved, so it is never the spare.
+        if scopeCount >= MAX_SCOPES then
+            local spare=spareScope()
+            if spare then dropScope(spare) end
+        end
         db[current.key]=current.data
         scopeCount=scopeCount+1
     end
@@ -398,13 +431,7 @@ local function eraseLeft(character, key)
         if validMember(other,guild) == key and other ~= character then kept=true end
     end
     if not kept then
-        if db[key] then
-            db[key]=nil
-            scopeCount=scopeCount-1
-        end
-        -- The loader rejects removal records without their scope.
-        WhowhoGuildBlacklistDB.scopes[key]=nil
-        if WhowhoGuildBlacklistDB.removed then WhowhoGuildBlacklistDB.removed[key]=nil end
+        dropScope(key)
     end
     members[character]=nil
 end
@@ -566,7 +593,7 @@ local function merge(current, identity, name, classUpdate, reasonIds, note, note
     local old=data.rows[identity]
     local row=combine(old,name,classUpdate,reasonIds,note,noteRev)
     if row == old then return "unchanged" end
-    if not old and not db[current.key] and scopeCount >= MAX_SCOPES then return "limit" end
+    if not old and not db[current.key] and scopeCount >= MAX_SCOPES and not spareScope() then return "limit" end
     local retained, displaced=retainRow(data,identity,old,row)
     if not retained then return "limit" end
     if displaced then forgetQueuedRow(current,displaced) end
@@ -1113,7 +1140,7 @@ local function receive(prefix, message, channel, sender)
             for _, queue in ipairs({current.pushRemoved,current.snapshotRemoved}) do
                 if queue[identity] and not supersedes(queue[identity],record) then queue[identity]=nil end
             end
-            if supersedes(record,current.data.removed[identity]) and (db[current.key] or scopeCount < MAX_SCOPES) then
+            if supersedes(record,current.data.removed[identity]) then
                 putRecord(current.data,identity,record)
                 -- At the cap an older record is evicted at once and must not drop the row, or a stale E restores it.
                 if current.data.removed[identity] == record then
@@ -1126,7 +1153,8 @@ local function receive(prefix, message, channel, sender)
             end
         end
         if updated then
-            publish(current)
+            -- A removal alone never takes a slot; an unsaved list keeps it until an entry saves the list.
+            if db[current.key] or scopeCount < MAX_SCOPES then publish(current) end
             notify()
         end
         if current.followupAt then schedule(current) end
