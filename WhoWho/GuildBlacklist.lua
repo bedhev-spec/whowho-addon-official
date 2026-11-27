@@ -12,7 +12,7 @@ local REVISION_TICKS, MAX_SERVER_TIME, CLOCK_SKEW = 128.0, 4294967295, 5
 local MAX_REVISION = (MAX_SERVER_TIME+1)*REVISION_TICKS-1
 local SEND_INTERVAL, SYNC_INTERVAL, REPLY_INTERVAL, MEMBERSHIP_SETTLE = 1.25, 30, 90, 0.75
 local SCOPE_WAITS = {3, 6, 12, 24, 48, 84}
-local MAX_MEMBERS, CONFIRM_DELAY, LEAVE_DELAY = 256, 3, 60
+local MAX_MEMBERS, CONFIRM_DELAY, EVENT_WINDOW, LEAVE_DELAY = 256, 3, 60, 300
 local SAMPLE_WINDOW, SAMPLE_LIFETIME, MAX_ACKS, MAX_RESPONDERS = 12, 60, 8, 1024
 -- ChatConstantsDocumentation.lua for the pinned Forever build.
 local SUCCESS, DUPLICATE_PREFIX, ADDON_THROTTLE, CHANNEL_THROTTLE, LOCKDOWN = 0, 1, 3, 8, 11
@@ -252,19 +252,41 @@ local function atHome(character, key)
 end
 
 local function recordMember(seen)
-    if not seen.confirmed or not db[seen.key] or recordedGuild(seen.character) then return end
-    local members=WhowhoGuildBlacklistDB.members
-    if not plain(members) then
-        members={}
-        WhowhoGuildBlacklistDB.members=members
+    if not seen.confirmed or not db[seen.key] then return end
+    local home=recordedGuild(seen.character)
+    if home == seen.key then return end
+    -- While the old guild awaits its erase, the new one is noted apart so its list is kept.
+    local field=home and "joined" or "members"
+    local map=WhowhoGuildBlacklistDB[field]
+    if not plain(map) then
+        map={}
+        WhowhoGuildBlacklistDB[field]=map
     end
     local size=0
-    for _ in pairs(members) do size=size+1 end
+    for _ in pairs(map) do size=size+1 end
     -- shortcut: past the cap a new character is not recorded, so it cannot keep a list that another one leaves.
-    if size < MAX_MEMBERS or members[seen.character] ~= nil then
-        members[seen.character]=seen.key
-        atHome(seen.character,seen.key)
+    if size < MAX_MEMBERS or map[seen.character] ~= nil then
+        map[seen.character]=seen.key
+        if not home then atHome(seen.character,seen.key) end
     end
+end
+
+local function claimedScopes(except)
+    local claimed={}
+    for _, field in ipairs({"members","joined"}) do
+        local map=WhowhoGuildBlacklistDB and WhowhoGuildBlacklistDB[field]
+        if plain(map) then
+            for character, key in pairs(map) do
+                if character ~= except and validMember(character,key) then claimed[key]=true end
+            end
+        end
+    end
+    return claimed
+end
+
+local function forgetJoined(character)
+    local joined=WhowhoGuildBlacklistDB.joined
+    if plain(joined) then joined[character]=nil end
 end
 
 local function dropScope(key)
@@ -280,13 +302,7 @@ end
 -- A saved list no recorded character points to, fewest entries first.
 -- shortcut: a list waiting for the leave erase still counts as claimed, so a second list can go; erasing it sooner would trust one guild reading.
 local function spareScope()
-    local members=WhowhoGuildBlacklistDB and WhowhoGuildBlacklistDB.members
-    local claimed={}
-    if plain(members) then
-        for character, key in pairs(members) do
-            if validMember(character,key) then claimed[key]=true end
-        end
-    end
+    local claimed=claimedScopes()
     local spare
     for key, data in pairs(db) do
         if not claimed[key] and (not spare or data.count < db[spare].count
@@ -427,14 +443,9 @@ end
 
 local function eraseLeft(character, key)
     if state and state.key == key then return end
-    local members, kept=WhowhoGuildBlacklistDB.members, false
-    for other, guild in pairs(members) do
-        if validMember(other,guild) == key and other ~= character then kept=true end
-    end
-    if not kept then
-        dropScope(key)
-    end
-    members[character]=nil
+    if not claimedScopes(character)[key] then dropScope(key) end
+    WhowhoGuildBlacklistDB.members[character]=nil
+    forgetJoined(character)
 end
 
 local function startLeave(character, from, key)
@@ -456,6 +467,7 @@ local function track(found)
     local home=recordedGuild(character)
     if home == key then
         leaving=nil
+        forgetJoined(character)
         atHome(character,key)
     end
     if home and home ~= key then
@@ -1215,7 +1227,7 @@ local function confirmMembership(ticket, requireNewScope)
     end
     local _, _, changed=currentState()
     -- The settled reading can still show the old guild with no later event. The follow-up also ends the window.
-    if not (lastCharacter and recordedGuild(lastCharacter) and later(LEAVE_DELAY-MEMBERSHIP_SETTLE,function()
+    if not (lastCharacter and recordedGuild(lastCharacter) and later(EVENT_WINDOW-MEMBERSHIP_SETTLE,function()
         reread()
         if guildEvent == ticket then guildEvent=nil end
     end)) and guildEvent == ticket then guildEvent=nil end
