@@ -3410,7 +3410,6 @@ do
 
     local _,s,e=watching()
     check(hover(s,"Other Person","other")==4,"an unlisted hover reads only the hovered identity")
-    s.units.mouseover={name="Other Person",guid="other",player=false}
     check(hover(s,nil,nil)==4,"an absent mouseover still scans")
     local before=s.reads()
     s.units.mouseover={name="Other Person",guid="other",player=false}
@@ -3434,19 +3433,70 @@ do
     check(shown(live) and live.character:GetText()=="First Person","a listed hover alerts at once after an unlisted one")
     check(hover(s,"Other Person","other")==8,"leaving a tracked listed mouseover scans")
 
+    -- Observed listed players and unfinished work each keep the full scan.
     _,s,e=watching()
-    e.UnitClass=function() return "Mage","MAGE" end
-    local now=e.GetServerTime
-    e.GetServerTime=function() return nil end
     s:set("target","First Person","first",true)
-    check(hover(s,"Other Person","other")>4,"a pending scan is not skipped")
-    e.GetServerTime=now
+    check(hover(s,"Other Person","other")>4,"a listed target keeps unlisted hovers scanning")
+
+    _,s,e=watching()
+    e.IsInRaid=function() return false end
+    e.GetNumSubgroupMembers=function() return 1 end
+    s:set("party1","First Person","first")
+    s:event("GROUP_ROSTER_UPDATE")
+    check(hover(s,"Other Person","other")>4,"a listed group member keeps unlisted hovers scanning")
 
     local p
-    p,s=setup()
+    p,s=watching()
     p.BlacklistBanner.toggleTest()
     s:set("target","First Person","first",true)
+    s:set("target","Calm Person","calm",true)
     check(hover(s,"Other Person","other")>4,"a queued alert is not skipped")
+
+    -- An expired alert leaves an unqueued episode, which closing the Test banner asks to scan again.
+    p,s=watching()
+    p.BlacklistBanner.toggleTest()
+    s:set("target","First Person","first",true)
+    s:tick(10)
+    s:set("target","Calm Person","calm",true)
+    s:tick(3)
+    p.BlacklistBanner.toggleTest()
+    check(hover(s,"Other Person","other")>4,"a pending scan is not skipped")
+
+    _,s,e=watching()
+    e.IsInInstance=function() return true,"party" end
+    check(hover(s,"Other Person","other")==0,"an unlisted hover in an instance reads nobody")
+
+    -- An instance entered during a scan suspends after the sample is recorded.
+    p,s,e=watching()
+    local show=p.BlacklistBanner.showLive
+    p.BlacklistBanner.showLive=function(...)
+        local displayed=show(...)
+        e.IsInInstance=function() return true,"party" end
+        return displayed
+    end
+    s:set("target","First Person","first",true)
+    p.BlacklistBanner.showLive=show
+    e.IsInInstance=function() return false,"none" end
+    s.units.target={name="Calm Person",guid="calm"}
+    check(hover(s,"Other Person","other")>4,"an unlisted hover resumes a mid-scan suspension")
+
+    -- A save for a unit already seen unlisted has no scan of its own.
+    for _,source in ipairs({"target","party1"}) do
+        local _,sim,env,A=setup()
+        env.IsInRaid=function() return false end
+        local members=source=="party1" and 1 or 0
+        env.GetNumSubgroupMembers=function() return members end
+        local event=source=="target" and "PLAYER_TARGET_CHANGED" or "GROUP_ROSTER_UPDATE"
+        sim:set(source,"Calm Person","calm")
+        sim:event(event)
+        assert(A.save(nil,"blacklist","Calm Person","",nil,{"other"}))
+        check(#A.encounterLedger.groups(3,100)==0,"saving alone records no "..source.." encounter")
+        hover(sim,"Other Person","other")
+        members=0
+        sim:set(source,nil)
+        sim:event(event)
+        check(#A.encounterLedger.groups(3,100)==1,"a hover after a save records the listed "..source)
+    end
 
     _,s,e=setup()
     s:set("target","First Person","first",true)
@@ -3486,7 +3536,7 @@ do
     check(shown(live) and live.character:GetText()=="Guild Person","a guild-listed hover is not skipped")
 
     -- A hover nested in a scan must interrupt it, even when unlisted.
-    _,s,e=setup()
+    _,s,e=watching()
     local name,nested=e.GetUnitName,false
     e.GetUnitName=function(token)
         if token=="target" and not nested then

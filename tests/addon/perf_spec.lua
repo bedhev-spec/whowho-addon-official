@@ -71,7 +71,7 @@ local function word(i)
 end
 local function person(i) return "Player N"..word(i),"Player-1-"..pad(i) end
 
-local function raid()
+local function raid(listed)
     local _,s,e,_,n=fresh()
     e.IsInRaid=function() return true end
     e.GetNumGroupMembers=function() return 40 end
@@ -79,7 +79,7 @@ local function raid()
         local name,guid=person(i)
         s.units["raid"..i]={name=name,guid=guid}
     end
-    s:add(person(1))
+    s:add(person(listed or 1))
     s:event("GROUP_ROSTER_UPDATE")
     for _=1,40 do s:tick(.5) end
     return s,n
@@ -110,9 +110,9 @@ for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280,20},{"roster","G
     bound(case[1].." burst full scans",math.floor(reads/single+.5),case[4])
 end
 
--- An unlisted hover reads that unit only, not the raid.
+-- With nobody listed in the group, an unlisted hover reads that unit only, not the raid.
 do
-    local s,n=raid()
+    local s,n=raid(41)
     local before=n.reads
     for i=2,21 do
         s.units.mouseover=s.units["raid"..i]
@@ -120,6 +120,14 @@ do
     end
     check(n.reads>before,"each hovered identity is read")
     bound("20 unlisted raid hovers, name/GUID reads",n.reads-before,80)
+end
+
+do
+    local s,n=raid()
+    s.units.mouseover=s.units.raid2
+    local before=n.reads
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    check(n.reads-before>=164,"a listed player in the group keeps the full scan on an unlisted hover")
 end
 
 -- Each observer that reads a listed membership costs its own reads per plate.

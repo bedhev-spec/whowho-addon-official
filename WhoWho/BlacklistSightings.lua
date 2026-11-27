@@ -376,10 +376,10 @@ function B.installSightings()
         updating=needed
         observer:SetScript("OnUpdate",needed and update or nil)
     end
-    -- A full scan on every hover is costly in a raid, so an unlisted hover with nothing in progress is not scanned.
+    -- An unlisted hover skips the costly full scan only while no listed player is observed and the book is as last scanned.
     function retry.idleHover()
-        if previous.mouseover or pending or scanning or #queue>0 or suspended
-            or not retry.watching or not allowsLiveBanner() then return false end
+        if next(previous) or pending or scanning or #queue>0 or suspended
+            or sampledOwner.store~=A.store or not allowsLiveBanner() then return false end
         local name,guid,state=A.playerAddIdentity("mouseover",A.store,A.region)
         return state=="non-player" or state=="self"
             or name~=nil and not savedSighting(A.store,A.region,name,guid,G.bannerLookup(A.region))
