@@ -88,7 +88,21 @@ end
 local function colorName(label,record,whiteRosterName,verifiedClass)
     label:SetTextColor(P.NameColor(record,whiteRosterName,verifiedClass))
 end
+-- A peer can delete and re-add the entry, so its open confirmation closes once it is unlisted.
+local function closeStaleGuildDelete()
+    local target=S.deleteTarget
+    if not (target and target.guild) then return end
+    local records,scope,status=guildRecords()
+    -- Unsettled membership lists nothing and says nothing about the entry.
+    if not scope and status~="no_guild" then return end
+    local key=P.GuildBlacklistName.Key(target.name)
+    for _,record in ipairs(records) do
+        if record.searchKey==key then return end
+    end
+    S.deleteDialog:Hide()
+end
 function S.RefreshGuildBlacklist()
+    closeStaleGuildDelete()
     if S.editor then S.editor.RefreshGuildShare() end
     if guildPage() and S.window and S.window:IsVisible() then S.Refresh() end
     if S.settings and S.settings.RefreshGuildAvailability then S.settings:RefreshGuildAvailability() end

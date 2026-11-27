@@ -16,7 +16,7 @@ If someone earns a spot on your **Personal Blacklist**, pick one or more reasons
 
 Use the **Guild Blacklist** to share selected entries with guildmates who use WhoWho.
 
-Any guild member can delete a Guild Blacklist entry, and the deletion applies to the whole guild. WhoWho always asks you to confirm it. Guildmates catch up when they sync with a member who has the deletion, while older versions of WhoWho keep the entry. Only adding the player again on the **Guild Blacklist** page brings it back; sharing a Personal Blacklist entry does not.
+Any guild member with an up-to-date WhoWho can delete a Guild Blacklist entry, and the deletion applies to the whole guild. WhoWho always asks you to confirm it. Guildmates catch up when they sync with a member who has the deletion, while older versions of WhoWho keep the entry. Only adding the player again on the **Guild Blacklist** page brings it back; sharing a Personal Blacklist entry does not.
 
 ### Quick Add
 
