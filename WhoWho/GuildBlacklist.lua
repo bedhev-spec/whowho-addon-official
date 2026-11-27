@@ -1153,7 +1153,8 @@ local function receive(prefix, message, channel, sender)
             end
         end
         if updated then
-            -- A removal alone never takes a slot; an unsaved list keeps it until an entry saves the list.
+            -- A removal alone never takes a slot.
+            -- shortcut: an unsaved list holds removals in memory only, so a reload or loading screen drops them until the next sync.
             if db[current.key] or scopeCount < MAX_SCOPES then publish(current) end
             notify()
         end
