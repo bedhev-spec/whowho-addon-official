@@ -38,6 +38,7 @@ local function refresh(at, metadataOnly)
     local records = store.activeRecords(A.region)
     if not records then return end
     local rebuilt = {}
+    local counts = {friend=0, blacklist=0}
     local rosterContext = {}
     local expiry, playerFaction, factionRead
     if not at and ((A.targetCheck and A.targetCheck.hasSightings()) or (A.whoLookup and A.whoLookup.hasReports())) then at=now() end
@@ -78,9 +79,11 @@ local function refresh(at, metadataOnly)
         -- A roster API can dispatch an event and rebuild the view before returning.
         if revision ~= refreshRevision then return end
         rebuilt[#rebuilt + 1] = item
+        counts[item.membership] = counts[item.membership] + 1
     end
     for i = #A.records, 1, -1 do A.records[i] = nil end
     for i, item in ipairs(rebuilt) do A.records[i] = item end
+    A.counts=counts
     A.recordsStore=store
     nextSightingExpiry=expiry
     if not metadataOnly and P.BlacklistBanner.sightingsBookChanged then P.BlacklistBanner.sightingsBookChanged() end

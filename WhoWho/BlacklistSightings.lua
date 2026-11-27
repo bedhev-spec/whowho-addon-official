@@ -98,10 +98,17 @@ local function readGroupContext(token)
 end
 
 local function hasBlacklist()
+    if A.counts then return A.counts.blacklist>0 end
     for _,record in ipairs(A.records) do
         if record.membership=="blacklist" then return true end
     end
     return false
+end
+
+-- Unsettled guild membership keeps plates: it can neither alert nor disprove them.
+local function platesWanted(region)
+    local lookup,_,unavailable=G.bannerLookup(region)
+    return hasBlacklist() or lookup~=nil or unavailable==true,lookup
 end
 
 -- Group joins are tracked by GUID, which stays readable when a name is late, and apart from the Blacklist.
@@ -136,7 +143,15 @@ local function newParty()
             known[guid]=false
         end
         for guid,left in pairs(known) do
-            if not seen[guid] and not held[guid] and not left then known[guid],party.joins[guid]=clock,nil end
+            if not seen[guid] and not held[guid] and not left then known[guid],party.joins[guid]=clock,nil
+            -- An expired departure reads the same as an unknown member.
+            elseif left and clock-left>=limits.absenceGrace then known[guid]=nil end
+        end
+        for guid,at in pairs(party.alerted) do
+            if clock-at>=limits.absenceGrace then party.alerted[guid]=nil end
+        end
+        for guid,at in pairs(party.bypassed) do
+            if clock-at>=joinBypassInterval then party.bypassed[guid]=nil end
         end
     end
     function party.claim(episode,guid,clock,cooling)
@@ -435,9 +450,12 @@ function B.installSightings()
     local function seedPlates()
         if not world or not platesEnabled or not allowsLiveBanner() then return end
         local owned=plateRevision
+        local wanted,guildLookup=platesWanted(A.region)
+        -- Skipped plates are seeded again once a Blacklist or guild list needs them.
+        retry.skipped=not wanted
+        if not wanted then return end
         local frames=reader.nameplateFrames()
         if not frames then return end
-        local guildLookup=G.bannerLookup(A.region)
         local matched,count=false,0
         for _,frame in next,frames do
             if count>=plateLimit or owned~=plateRevision then break end
@@ -1028,6 +1046,7 @@ function B.installSightings()
     function B.sightingsBookChanged()
         if not world then return end
         local changed
+        if retry.skipped then changed=seedPlates() end
         local guildLookup=G.bannerLookup(A.region)
         for _,plate in pairs(plates) do
             local record=plateRecord(A.store,A.region,plate,guildLookup)
@@ -1046,6 +1065,7 @@ function B.installSightings()
     function B.sightingsGuildChanged()
         if not world then return end
         guildDirty=true
+        if retry.skipped then seedPlates() end
         sample()
     end
     function B.sightingsNameplatesChanged(enabled)
@@ -1068,7 +1088,12 @@ function B.installSightings()
         plateRevision=plateRevision+1
         forgetPlate(token)
         retry.units[token]=nil
-        local matched=event=="NAME_PLATE_UNIT_ADDED" and rememberPlate(token,nil,G.bannerLookup(A.region))
+        local matched
+        if event=="NAME_PLATE_UNIT_ADDED" then
+            local wanted,guildLookup=platesWanted(A.region)
+            if wanted then matched=rememberPlate(token,nil,guildLookup)
+            else retry.skipped=true end
+        end
         if matched or prior or old and old.record or retry.plates[token] and not retry.watching then sample()
         elseif retry.plates[token] then refreshUpdates() end
     end

@@ -110,7 +110,9 @@ for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280,20},{"roster","G
     bound(case[1].." burst full scans",math.floor(reads/single+.5),case[4])
 end
 
-for _,case in ipairs({{"empty book",false,1536},{"unmatched book",true,1536}}) do
+-- Each observer that reads a listed membership costs its own reads per plate.
+for _,case in ipairs({{"empty book",{},0,0},{"unmatched Blacklist only",{"blacklist"},1,1024},
+    {"unmatched Friend only",{"friend"},1,512},{"unmatched book",{"blacklist","friend"},1025,1536}}) do
     local p,s,_,A,n=fresh()
     local seen={check=0,sightings=0}
     local function counted(target,key,name)
@@ -119,15 +121,37 @@ for _,case in ipairs({{"empty book",false,1536},{"unmatched book",true,1536}}) d
     end
     counted(A.nameplateCheck,"onEvent","check")
     counted(p.BlacklistBanner,"sightingsNameplateEvent","sightings")
-    if case[2] then
-        s:add("Nobody Here","Player-9-00000001")
-        s:add("Nobody There","Player-9-00000002","friend")
-    end
+    for i,section in ipairs(case[2]) do s:add("Nobody "..(i==1 and "Here" or "There"),"Player-9-0000000"..i,section) end
     local before=n.reads
     for i=1,256 do s:plate("nameplate"..i,person(i)) end
     check(A.automaticNameplatesEnabled() and seen.check==256 and seen.sightings==256,"both observers see every plate")
-    if case[2] then check(n.reads>before,"a listed book reads plates") end
-    bound("256 plates, "..case[1]..", name/GUID reads",n.reads-before,case[3])
+    check(n.reads-before>=case[3],"listed memberships read plates")
+    bound("256 plates, "..case[1]..", name/GUID reads",n.reads-before,case[4])
+end
+
+-- Cached name checks answer exactly as the first, uncached, call did.
+do
+    local p=fresh()
+    local Name=p.CharacterName
+    local nbsp,zeroWidth,invalid=string.char(194,160),string.char(226,128,139),string.char(255)
+    local newline=string.char(10)
+    for _,case in ipairs({{"Ari North","Ari North","Ari North"},{"  Ari   North ","Ari North","Ari North"},
+        {"Ari","nil","Ari"},{"Ari North Star","nil","nil"},{"","nil","nil"},{"Élan Amber","Élan Amber","Élan Amber"},
+        {"Ari"..nbsp.."North","Ari North","Ari North"},{"Ari"..zeroWidth.." North","nil","nil"},
+        {"Ari "..invalid.."North","nil","nil"},{"Ari"..newline.."North","nil","nil"},
+        {"Ari North"..newline,"Ari North","Ari North"}}) do
+        for _=1,2 do
+            check(tostring(Name.NormalizeManual(case[1]))==case[2],"full name: "..case[1])
+            check(tostring(Name.NormalizeManual(case[1],true))==case[3],"draft name: "..case[1])
+        end
+    end
+    local normalized=0
+    local scalars=Name.CountScalars
+    Name.CountScalars=function(text) normalized=normalized+1; return scalars(text) end
+    for i=1,1100 do assert(Name.IsComplete((person(i)))) end
+    check(normalized==1100,"distinct names are each normalized")
+    check(Name.IsComplete((person(1100))) and normalized==1100,"a recent name is cached")
+    check(Name.IsComplete((person(1))) and normalized==1101,"a full cache starts over")
 end
 
 do
@@ -153,7 +177,7 @@ do
     bound("100 chat lines, name normalizations",normalized,100)
     bound("100 chat lines, class reads",classReads,100)
     lines()
-    bound("same 100 authors again, name normalizations",normalized,100)
+    bound("same 100 authors again, name normalizations",normalized,0)
     bound("same 100 authors again, class reads",classReads,100)
 end
 
