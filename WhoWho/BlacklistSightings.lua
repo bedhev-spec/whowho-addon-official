@@ -12,7 +12,7 @@ local retryWaits={3,6,12,24,48,84}
 local joinBypassInterval=30
 local plateLimit=256
 -- One table: installSightings functions are close to the Lua 5.1 limit of 60 upvalues.
-local limits={absenceGrace=5,pollInterval=.25,groupWindow=3,pendingLifetime=12,pendingLimit=8,blockedLimit=48}
+local limits={absenceGrace=5,pollInterval=.25,groupWindow=3,pendingLifetime=12,pendingLimit=8,blockedLimit=48,mouseoverCoalesce=.1}
 
 local function allowsLiveBanner()
     if type(IsInInstance)~="function" then return false end
@@ -1146,6 +1146,16 @@ function B.installSightings()
             if event=="PLAYER_TARGET_CHANGED" then requested.target,retry.units.target=true,nil end
             if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover,retry.units.mouseover=true,nil end
             if event=="ZONE_CHANGED_NEW_AREA" then seedPlates() end
+            -- Only a readable clock can defer: a stalled one would hold every later hover back.
+            if event=="UPDATE_MOUSEOVER_UNIT" and advance() then
+                if retry.lastMouseoverSample and clock-retry.lastMouseoverSample<limits.mouseoverCoalesce then
+                    -- Scans next frame, and still takes ownership from work in flight.
+                    resumeTest,revision,pending=false,revision+1,true
+                    refreshUpdates()
+                    return
+                end
+                retry.lastMouseoverSample=clock
+            end
             sample(nil,event=="GROUP_ROSTER_UPDATE")
         end
     end)

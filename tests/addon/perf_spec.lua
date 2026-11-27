@@ -104,7 +104,7 @@ local function burst(event)
     return reads,single
 end
 
-for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280,20},{"roster","GROUP_ROSTER_UPDATE",4692,23}}) do
+for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",328,2},{"roster","GROUP_ROSTER_UPDATE",4692,23}}) do
     local reads,single=burst(case[2])
     bound(case[1].." burst name/GUID reads",reads,case[3])
     bound(case[1].." burst full scans",math.floor(reads/single+.5),case[4])
