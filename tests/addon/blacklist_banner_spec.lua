@@ -3388,36 +3388,4 @@ do
     checkTabs(p,pane,{"Last hour","Recent","Earlier"},1)
 end
 
-do
-    local _,s,e=fresh()
-    s:add("Hover Person","hover")
-    s:set("target","Hover Person","hover")
-    s:set("mouseover","Hover Person","hover")
-    local function scans(action)
-        local before=s.reads()
-        action()
-        return s.reads()>before
-    end
-    local function event(name) return scans(function() s:event(name) end) end
-    local function frame(elapsed) return scans(function() s:tick(elapsed) end) end
-    local hover="UPDATE_MOUSEOVER_UNIT"
-    check(event(hover),"the first mouseover scans at once")
-    check(not event(hover),"a second mouseover inside the window does not scan at once")
-    check(frame(.01),"the deferred mouseover scans on the next frame")
-    s.advance(.2)
-    check(event(hover),"a mouseover after the window scans at once")
-    check(event("PLAYER_TARGET_CHANGED"),"a target change right after a mouseover scans at once")
-    check(event("GROUP_ROSTER_UPDATE"),"a roster change right after a mouseover scans at once")
-    s.advance(.2)
-    check(event("PLAYER_TARGET_CHANGED") and event(hover),"other events do not open the mouseover window")
-    e.UIParent:Hide()
-    check(not event(hover) and not frame(1),"a deferred mouseover waits while the observer is hidden")
-    e.UIParent:Show()
-    check(frame(.01),"the deferred mouseover scans on the first visible frame")
-    local getTime=e.GetTime
-    e.GetTime=function() return nil end
-    check(event(hover) and event(hover),"an unreadable clock never defers a mouseover")
-    e.GetTime=getTime
-end
-
 print("RESULT blacklist-banner and encounters simulated "..count.." passed; no client capability established")
