@@ -110,6 +110,18 @@ for _,case in ipairs({{"mouseover","UPDATE_MOUSEOVER_UNIT",3280,20},{"roster","G
     bound(case[1].." burst full scans",math.floor(reads/single+.5),case[4])
 end
 
+-- An unlisted hover reads that unit only, not the raid.
+do
+    local s,n=raid()
+    local before=n.reads
+    for i=2,21 do
+        s.units.mouseover=s.units["raid"..i]
+        s:event("UPDATE_MOUSEOVER_UNIT")
+    end
+    check(n.reads>before,"each hovered identity is read")
+    bound("20 unlisted raid hovers, name/GUID reads",n.reads-before,80)
+end
+
 -- Each observer that reads a listed membership costs its own reads per plate.
 for _,case in ipairs({{"empty book",{},0,0},{"unmatched Blacklist only",{"blacklist"},1,1024},
     {"unmatched Friend only",{"friend"},1,512},{"unmatched book",{"blacklist","friend"},1025,1536}}) do

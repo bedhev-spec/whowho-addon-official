@@ -376,6 +376,14 @@ function B.installSightings()
         updating=needed
         observer:SetScript("OnUpdate",needed and update or nil)
     end
+    -- A full scan on every hover is costly in a raid, so an unlisted hover with nothing in progress is not scanned.
+    function retry.idleHover()
+        if previous.mouseover or pending or scanning or #queue>0 or suspended
+            or not retry.watching or not allowsLiveBanner() then return false end
+        local name,guid,state=A.playerAddIdentity("mouseover",A.store,A.region)
+        return state=="non-player" or state=="self"
+            or name~=nil and not savedSighting(A.store,A.region,name,guid,G.bannerLookup(A.region))
+    end
     local function expireEpisodes()
         for id,episode in pairs(episodes) do
             if episode.encounterAbsentSince and clock-episode.encounterAbsentSince>=limits.absenceGrace then
@@ -1146,6 +1154,8 @@ function B.installSightings()
             if event=="PLAYER_TARGET_CHANGED" then requested.target,retry.units.target=true,nil end
             if event=="UPDATE_MOUSEOVER_UNIT" then requested.mouseover,retry.units.mouseover=true,nil end
             if event=="ZONE_CHANGED_NEW_AREA" then seedPlates() end
+            -- The event dropped the mouseover retry, so the update state still has to follow.
+            if event=="UPDATE_MOUSEOVER_UNIT" and retry.idleHover() then refreshUpdates(); return end
             sample(nil,event=="GROUP_ROSTER_UPDATE")
         end
     end)

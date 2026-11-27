@@ -3388,4 +3388,135 @@ do
     checkTabs(p,pane,{"Last hour","Recent","Earlier"},1)
 end
 
+-- An unlisted hover is skipped only while a scan could not change anything.
+do
+    local function setup()
+        local p,s,e,A=fresh({automaticTarget=false,automaticMouseover=false})
+        s:add("First Person","first")
+        s:add("Second Person","second")
+        return p,s,e,A
+    end
+    local function hover(s,name,guid)
+        local before=s.reads()
+        s:set("mouseover",name,guid,true)
+        return s.reads()-before
+    end
+    -- An unlisted target makes a full scan cost more reads than the hover check alone.
+    local function watching()
+        local p,s,e,A=setup()
+        s:set("target","Calm Person","calm",true)
+        return p,s,e,A
+    end
+
+    local _,s,e=watching()
+    check(hover(s,"Other Person","other")==4,"an unlisted hover reads only the hovered identity")
+    s.units.mouseover={name="Other Person",guid="other",player=false}
+    check(hover(s,nil,nil)==4,"an absent mouseover still scans")
+    local before=s.reads()
+    s.units.mouseover={name="Other Person",guid="other",player=false}
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    check(s.reads()==before,"a non-player hover is skipped")
+    s.units.mouseover={name="Current Person",guid="current",self=true}
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    check(s.reads()==before,"a self hover is skipped")
+    s.units.mouseover={name="Other Person",guid="other",restricted=true}
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    check(s.reads()==before+4 and s.observer:GetScript("OnUpdate"),"a restricted hover still scans and is retried")
+    check(hover(s,"Other Person","other")==4 and not s.observer:GetScript("OnUpdate"),
+        "a skipped hover drops the previous hover's retry")
+    before=s.reads()
+    s.units.mouseover={name="Other",guid="other"}
+    s:event("UPDATE_MOUSEOVER_UNIT")
+    check(s.reads()-before>4,"an incomplete hovered name still scans")
+    hover(s,"Other Person","other")
+    hover(s,"First Person","first")
+    local live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and live.character:GetText()=="First Person","a listed hover alerts at once after an unlisted one")
+    check(hover(s,"Other Person","other")==8,"leaving a tracked listed mouseover scans")
+
+    _,s,e=watching()
+    e.UnitClass=function() return "Mage","MAGE" end
+    local now=e.GetServerTime
+    e.GetServerTime=function() return nil end
+    s:set("target","First Person","first",true)
+    check(hover(s,"Other Person","other")>4,"a pending scan is not skipped")
+    e.GetServerTime=now
+
+    local p
+    p,s=setup()
+    p.BlacklistBanner.toggleTest()
+    s:set("target","First Person","first",true)
+    check(hover(s,"Other Person","other")>4,"a queued alert is not skipped")
+
+    _,s,e=setup()
+    s:set("target","First Person","first",true)
+    live=e.WhowhoBlacklistLiveBanner
+    for _,kind in ipairs({"party","raid"}) do
+        e.IsInInstance=function() return false,"none" end
+        s:event("PLAYER_TARGET_CHANGED")
+        e.IsInInstance=function() return true,kind end
+        hover(s,"Other Person","other")
+        check(not shown(live),"an unlisted hover in a "..kind.." instance still scans and suppresses")
+    end
+
+    _,s,e=setup()
+    e.IsInInstance=function() return true,"party" end
+    s:set("target","First Person","first",true)
+    e.IsInInstance=function() return false,"none" end
+    hover(s,"Other Person","other")
+    check(shown(e.WhowhoBlacklistLiveBanner),"an unlisted hover resumes suspended sightings")
+
+    _,s,e=setup()
+    s:set("target","First Person","first",true)
+    s.region(4)
+    hover(s,"Other Person","other")
+    check(not shown(e.WhowhoBlacklistLiveBanner),"an unlisted hover after a region change still resets")
+
+    _,s=fresh()
+    check(hover(s,"Other Person","other")==0 and hover(s,"Other Person","other")==0,
+        "nothing listed adds no identity reads")
+
+    p,s,e=setup()
+    p.GuildBlacklist.bannerLookup=function()
+        return function(name) if name=="Guild Person" then return "guild:1","" end end
+    end
+    s:set("target","Calm Person","calm",true)
+    hover(s,"Guild Person","guild")
+    live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and live.character:GetText()=="Guild Person","a guild-listed hover is not skipped")
+
+    -- A hover nested in a scan must interrupt it, even when unlisted.
+    _,s,e=setup()
+    local name,nested=e.GetUnitName,false
+    e.GetUnitName=function(token)
+        if token=="target" and not nested then
+            nested=true
+            s:set("mouseover","Other Person","other",true)
+        end
+        return name(token)
+    end
+    s:set("target","First Person","first",true)
+    check(not shown(e.WhowhoBlacklistLiveBanner),"a hover during a scan is not skipped")
+    s:tick(.25)
+    check(shown(e.WhowhoBlacklistLiveBanner),"the interrupted scan runs again")
+
+    -- A listed hover arriving while the skip check reads the identity keeps its alert.
+    _,s,e=watching()
+    name,nested=e.GetUnitName,false
+    e.GetUnitName=function(token)
+        local value=name(token)
+        if token=="mouseover" and not nested then
+            nested=true
+            s:set("mouseover","First Person","first",true)
+        end
+        return value
+    end
+    local sounds=0
+    e.C_Sound={PlaySoundWithOptions=function() sounds=sounds+1; return true end}
+    s:set("mouseover","Other Person","other",true)
+    live=e.WhowhoBlacklistLiveBanner
+    check(shown(live) and live.character:GetText()=="First Person" and sounds==1,
+        "a reentrant listed hover during the skip check alerts once")
+end
+
 print("RESULT blacklist-banner and encounters simulated "..count.." passed; no client capability established")
