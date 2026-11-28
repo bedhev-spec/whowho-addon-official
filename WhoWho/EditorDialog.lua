@@ -335,20 +335,7 @@ function P.EditorDialog.Create(parent, options)
     end)
     local function escapeForm() controls.form:Hide() end
     controls.formName:SetScript("OnEscapePressed",escapeForm); controls.formNote:SetScript("OnEscapePressed",escapeForm)
-    local function saveForm()
-        local inputRevision=formRevision
-        if savingGuild or not controls.form:IsShown() then return end
-        if draft.duplicateTarget then
-            local target=draft.duplicateTarget
-            local currentName=controls.formName:GetText()
-            currentName=P.manual.text(currentName); if currentName then currentName=Name.NormalizeManual(currentName) end
-            if currentName==target.fullName then
-                local current=currentRecord(target)
-                if current then controls.form:Hide(); options.onOpenDuplicate(current); return end
-            end
-            clearDuplicate(); draft.nameError=true; controls.formError:SetText(L("Entry changed; search again.")); return
-        end
-        local evidence=draft.addEvidence
+    local function readForm()
         local name=controls.formName:GetText(); local note=controls.formNote:GetText()
         name=P.manual.text(name); note=P.manual.text(note)
         if not name or not note then controls.formError:SetText(L("Text unavailable; no changes saved.")); return end
@@ -370,6 +357,39 @@ function P.EditorDialog.Create(parent, options)
                 return
             end
         end
+        return name,note,enteredName,reasons
+    end
+    local function showDuplicate(name)
+        local complete=Name.IsComplete(name)
+        local editingId=draft.formRecord and draft.formRecord.id
+        for _, existing in ipairs(options.records) do if complete and existing.identityState~="unresolved"
+            and existing~=draft.formRecord and (not editingId or existing.id~=editingId) and existing.fullName==name then
+            draft.nameError=true; draft.duplicateTarget={id=existing.id,fullName=existing.fullName,region=existing.region,guid=existing.guid}
+            controls.formError:SetText(L(existing.membership=="blacklist" and "Already in Blacklist: %s" or "Already in Friends: %s",existing.fullName))
+            controls.formSave.label:SetText(L("Open existing"))
+            local actionWidth=math.max(112,math.ceil(controls.formSave.label:GetUnboundedStringWidth())+16)
+            controls.formSave:SetWidth(actionWidth)
+            controls.formCancel:ClearAllPoints(); controls.formCancel:SetPoint("BOTTOMRIGHT",-(actionWidth+36),24)
+            controls.formName:SetFocus(); return true
+        end end
+        return false
+    end
+    local function saveForm()
+        local inputRevision=formRevision
+        if savingGuild or not controls.form:IsShown() then return end
+        if draft.duplicateTarget then
+            local target=draft.duplicateTarget
+            local currentName=controls.formName:GetText()
+            currentName=P.manual.text(currentName); if currentName then currentName=Name.NormalizeManual(currentName) end
+            if currentName==target.fullName then
+                local current=currentRecord(target)
+                if current then controls.form:Hide(); options.onOpenDuplicate(current); return end
+            end
+            clearDuplicate(); draft.nameError=true; controls.formError:SetText(L("Entry changed; search again.")); return
+        end
+        local evidence=draft.addEvidence
+        local name,note,enteredName,reasons=readForm()
+        if not name then return end
         local original=draft.formRecord
         local section,role,moving,formRegion=draft.formSection,draft.formRoleValue,draft.moving,draft.region
         local guildScope=draft.shareGuild and draft.guildScope or nil
@@ -404,18 +424,7 @@ function P.EditorDialog.Create(parent, options)
             if saved then controls.form:Hide(); return end
             controls.formError:SetText(L(issue)); return
         end
-        local complete=Name.IsComplete(name)
-        local editingId=draft.formRecord and draft.formRecord.id
-        for _, existing in ipairs(options.records) do if complete and existing.identityState~="unresolved"
-            and existing~=draft.formRecord and (not editingId or existing.id~=editingId) and existing.fullName==name then
-            draft.nameError=true; draft.duplicateTarget={id=existing.id,fullName=existing.fullName,region=existing.region,guid=existing.guid}
-            controls.formError:SetText(L(existing.membership=="blacklist" and "Already in Blacklist: %s" or "Already in Friends: %s",existing.fullName))
-            controls.formSave.label:SetText(L("Open existing"))
-            local actionWidth=math.max(112,math.ceil(controls.formSave.label:GetUnboundedStringWidth())+16)
-            controls.formSave:SetWidth(actionWidth)
-            controls.formCancel:ClearAllPoints(); controls.formCancel:SetPoint("BOTTOMRIGHT",-(actionWidth+36),24)
-            controls.formName:SetFocus(); return
-        end end
+        if showDuplicate(name) then return end
         do
             local quickAdd=evidence and evidence.quickAdd
             local lookupClass=draft.formSection=="blacklist" and not draft.moving and draft.playerMenuName~=name and not quickAdd
