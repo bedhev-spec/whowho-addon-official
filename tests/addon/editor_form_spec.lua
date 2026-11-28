@@ -37,17 +37,24 @@ check(form.formError:GetText()=="Name is fixed for this saved character."
     and form.form:IsShown() and snapshot()==before,"saved name cannot change and nothing is saved")
 form.form:Hide()
 
-S.editButton:Click()
 local realSecret=e.issecretvalue
-form.formNote:SetText("changed"); e.issecretvalue=function() return true end
-form.formSave:Click(); e.issecretvalue=realSecret
-check(form.formError:GetText()=="Text unavailable; no changes saved."
-    and form.form:IsShown() and snapshot()==before,"unreadable text is rejected and nothing is saved")
-form.form:Hide()
+for _,case in ipairs({{"name","hidden-name-sentinel","changed"},{"note","Élan Amber","hidden-note-sentinel"}}) do
+    S.editButton:Click()
+    form.formNote:SetText(case[3]); form.formName:SetText(case[2])
+    local hidden=case[1]=="name" and case[2] or case[3]
+    e.issecretvalue=function(v) return v==hidden or realSecret(v) end
+    form.formSave:Click(); e.issecretvalue=realSecret
+    check(form.formError:GetText()=="Text unavailable; no changes saved."
+        and form.form:IsShown() and snapshot()==before,"unreadable "..case[1].." alone is rejected and nothing is saved")
+    form.form:Hide()
+end
 
 S.addButton:Click(); form=S.editor.controls
-form.formName:SetText("Élan Amber"); form.formNote:SetText("other note"); form.formSave:Click()
+form.formName:SetText("Élan Amber"); form.formNote:SetText("other note"); form.formName:ClearFocus(); form.formSave:Click()
 check(form.formError:GetText()=="Already in Friends: Élan Amber" and form.formSave.label:GetText()=="Open existing"
     and form.form:IsShown() and snapshot()==before and saveCalls==1,"duplicate offers the existing entry and nothing is saved")
+local _,cancelX=form.formCancel:GetPoint()
+check(form.formName:HasFocus() and form.formSave:GetWidth()>=112 and cancelX==-(form.formSave:GetWidth()+36),
+    "duplicate focuses the name and moves Cancel left of the widened Save button")
 check(s.forbiddenCalls==0,"zero forbidden actions")
 print(("RESULT editor form %d checks passed"):format(count))
